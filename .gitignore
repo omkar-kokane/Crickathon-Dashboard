@@ -1,0 +1,22 @@
+# Environment files
+.env
+.env.local
+*.env.local
+
+# Firebase service account (NEVER commit this)
+backend/service_account_key.json
+
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/alembic/versions/*.py
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# OS
+.DS_Store
+Thumbs.db

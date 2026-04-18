@@ -1,0 +1,18 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+venv/
+
+# Environment variables
+.env
+service_account_key.json
+
+# Alembic
+alembic/versions/*.py
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
