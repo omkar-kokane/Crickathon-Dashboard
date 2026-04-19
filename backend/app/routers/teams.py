@@ -112,7 +112,13 @@ def join_team(
     # Get or create the User record
     user = session.exec(select(User).where(User.firebase_uid == current_user["uid"])).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User profile not found. Please sign in again.")
+        user = User(
+            firebase_uid=current_user["uid"],
+            email=current_user.get("email", ""),
+            role=UserRole.PARTICIPANT
+        )
+        session.add(user)
+        session.flush()
 
     # Check if already a member
     existing = session.exec(

@@ -1,11 +1,12 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { ref, onValue } from "firebase/database";
 import { rtdb } from "@/lib/firebase";
 
 interface EventState {
   event_id: string;
   current_phase: string;
+  phase_name?: string | null;
   phase_end_time: string | null;
 }
 
@@ -13,15 +14,19 @@ interface CountdownResult {
   eventState: EventState | null;
   secondsLeft: number;
   isActive: boolean;
+  isTimeout: boolean;
 }
 
 /**
  * Subscribes to Firebase Realtime DB for live event phase/timer state.
  * Computes local countdown from phase_end_time to prevent server lag.
+ * Returns isTimeout=true when a timed phase reaches 0.
  */
 export function useEventTimer(eventId: string): CountdownResult {
   const [eventState, setEventState] = useState<EventState | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  // Track whether a phase_end_time was set (so we can distinguish "no timer" from "timer ended")
+  const hadTimer = useRef(false);
 
   // Subscribe to Firebase for real-time updates
   useEffect(() => {
@@ -38,8 +43,10 @@ export function useEventTimer(eventId: string): CountdownResult {
   useEffect(() => {
     if (!eventState?.phase_end_time) {
       setSecondsLeft(0);
+      hadTimer.current = false;
       return;
     }
+    hadTimer.current = true;
     const tick = () => {
       const end = new Date(eventState.phase_end_time!).getTime();
       const now = Date.now();
@@ -52,6 +59,13 @@ export function useEventTimer(eventId: string): CountdownResult {
   }, [eventState?.phase_end_time]);
 
   const isActive = secondsLeft > 0 && eventState?.current_phase !== "ENDED";
+  // Timeout = timer was set, reached 0, and phase is not ENDED or PRE_MATCH
+  const isTimeout =
+    hadTimer.current &&
+    secondsLeft === 0 &&
+    !!eventState?.phase_end_time &&
+    eventState?.current_phase !== "ENDED" &&
+    eventState?.current_phase !== "PRE_MATCH";
 
-  return { eventState, secondsLeft, isActive };
+  return { eventState, secondsLeft, isActive, isTimeout };
 }

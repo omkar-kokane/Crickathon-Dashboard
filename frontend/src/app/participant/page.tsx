@@ -37,7 +37,7 @@ export default function ParticipantDashboard() {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
-  const { eventState, secondsLeft, isActive } = useEventTimer(eventId);
+  const { eventState, secondsLeft, isActive, isTimeout } = useEventTimer(eventId);
   const liveRequests = useActionRequests(eventId);
 
   // Redirect if not participant
@@ -61,6 +61,13 @@ export default function ParticipantDashboard() {
     fetchTeam();
   }, []);
 
+  const getErrorText = (err: any, fallback: string) => {
+    const d = err?.response?.data?.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d)) return d[0]?.msg || fallback;
+    return fallback;
+  };
+
   const handleActionRequest = async (type: string) => {
     if (!team) return;
     setLoadingAction(type);
@@ -73,7 +80,7 @@ export default function ParticipantDashboard() {
       });
       setActionMsg({ text: `${type.replace("_", " ")} request sent! Waiting for Umpire...`, type: "success" });
     } catch (err: any) {
-      setActionMsg({ text: err?.response?.data?.detail || "Request failed.", type: "error" });
+      setActionMsg({ text: getErrorText(err, "Request failed."), type: "error" });
     } finally {
       setLoadingAction(null);
     }
@@ -82,6 +89,10 @@ export default function ParticipantDashboard() {
   const urgencyColor = secondsLeft < 300 ? "text-[#ff1744]" : secondsLeft < 600 ? "text-[#ffd600]" : "text-[#00e676]";
 
   const myRequests = liveRequests.filter((r) => r.team_id === team?.team_id);
+
+  // Derive the display name for the current phase — prefer custom name, fallback to label map
+  const currentPhaseName = eventState?.phase_name
+    || (eventState ? PHASE_LABELS[eventState.current_phase] || eventState.current_phase : "Waiting...");
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] pb-8">
@@ -104,24 +115,38 @@ export default function ParticipantDashboard() {
 
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
         {/* Live Timer — Hero Section */}
-        <div className="glass rounded-2xl p-6 text-center glow-green">
-          <div className="text-xs text-slate-400 uppercase tracking-widest mb-2">
-            {eventState ? PHASE_LABELS[eventState.current_phase] || eventState.current_phase : "Waiting..."}
+        {isTimeout ? (
+          <div className="glass rounded-2xl p-6 text-center border border-[#ff1744]/30 animate-pulse">
+            <div className="text-xs text-[#ff1744] uppercase tracking-widest mb-2 font-bold">
+              {currentPhaseName}
+            </div>
+            <div className="text-5xl sm:text-7xl font-black text-[#ff1744] tracking-tight">
+              🚨 TIMEOUT
+            </div>
+            <div className="mt-3 text-sm text-[#ff1744]/80 font-medium">
+              Power Play Ended
+            </div>
           </div>
-          <div className={`text-7xl font-mono font-black tracking-tight ${urgencyColor} text-glow-green transition-colors`}>
-            {isActive ? formatTime(secondsLeft) : "-- : --"}
+        ) : (
+          <div className="glass rounded-2xl p-6 text-center glow-green">
+            <div className="text-xs text-slate-400 uppercase tracking-widest mb-2">
+              {currentPhaseName}
+            </div>
+            <div className={`text-7xl font-mono font-black tracking-tight ${urgencyColor} text-glow-green transition-colors`}>
+              {isActive ? formatTime(secondsLeft) : "-- : --"}
+            </div>
+            <div className="mt-2">
+              {isActive ? (
+                <span className="inline-flex items-center gap-1.5 text-xs text-[#00e676]">
+                  <span className="w-2 h-2 rounded-full bg-[#00e676] pulse-green" />
+                  Live
+                </span>
+              ) : (
+                <span className="text-xs text-slate-500">No active timer</span>
+              )}
+            </div>
           </div>
-          <div className="mt-2">
-            {isActive ? (
-              <span className="inline-flex items-center gap-1.5 text-xs text-[#00e676]">
-                <span className="w-2 h-2 rounded-full bg-[#00e676] pulse-green" />
-                Live
-              </span>
-            ) : (
-              <span className="text-xs text-slate-500">No active timer</span>
-            )}
-          </div>
-        </div>
+        )}
 
         {/* Team Stats */}
         <div className="grid grid-cols-2 gap-4">

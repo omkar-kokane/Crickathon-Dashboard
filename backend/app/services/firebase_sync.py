@@ -25,6 +25,7 @@ def push_event_state(event) -> None:
     _get_ref(f"/events/{event.event_id}").set({
         "event_id": str(event.event_id),
         "current_phase": event.current_phase.value,
+        "phase_name": event.phase_name,
         "phase_end_time": phase_end_time_iso,
     })
 

@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useState,
+  useCallback,
   ReactNode,
 } from "react";
 import {
@@ -31,12 +32,28 @@ interface AuthContextType {
   firebaseUser: User | null;
   userProfile: UserProfile | null;
   loading: boolean;
-  loginWithEmail: (email: string, password: string) => Promise<void>;
-  loginWithGoogle: () => Promise<void>;
+  loginWithEmail: (email: string, password: string) => Promise<UserProfile | null>;
+  loginWithGoogle: () => Promise<UserProfile | null>;
   logout: () => Promise<void>;
+  refreshProfile: () => Promise<UserProfile | null>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
+
+/**
+ * Fetches the user profile from the backend.
+ * Returns the profile or null if not found / error.
+ */
+async function fetchUserProfile(user: User): Promise<UserProfile | null> {
+  try {
+    await user.getIdToken(true); // force-refresh token
+    const res = await api.get("/api/users/me");
+    return res.data as UserProfile;
+  } catch (err: any) {
+    console.warn("[Auth] fetchUserProfile failed:", err?.response?.status, err?.response?.data?.detail || err?.message);
+    return null;
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
@@ -44,17 +61,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
+  // On mount: check if there's already a signed-in Firebase user
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (user) {
-        try {
-          const res = await api.get("/api/users/me");
-          setUserProfile(res.data);
-        } catch {
-          // User exists in Firebase but not yet in DB — send to /join
-          setUserProfile(null);
-        }
+        const profile = await fetchUserProfile(user);
+        setUserProfile(profile);
       } else {
         setUserProfile(null);
       }
@@ -63,24 +76,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  const loginWithEmail = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+  const refreshProfile = useCallback(async (): Promise<UserProfile | null> => {
+    const user = auth.currentUser;
+    if (!user) return null;
+    const profile = await fetchUserProfile(user);
+    setUserProfile(profile);
+    return profile;
+  }, []);
+
+  /**
+   * Login with email/password.
+   * Returns the user profile after successful login + profile fetch.
+   * The caller can use the returned profile to decide where to route.
+   */
+  const loginWithEmail = async (email: string, password: string): Promise<UserProfile | null> => {
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    const profile = await fetchUserProfile(cred.user);
+    setFirebaseUser(cred.user);
+    setUserProfile(profile);
+    return profile;
   };
 
-  const loginWithGoogle = async () => {
+  const loginWithGoogle = async (): Promise<UserProfile | null> => {
     const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    const cred = await signInWithPopup(auth, provider);
+    const profile = await fetchUserProfile(cred.user);
+    setFirebaseUser(cred.user);
+    setUserProfile(profile);
+    return profile;
   };
 
   const logout = async () => {
     await signOut(auth);
+    setFirebaseUser(null);
     setUserProfile(null);
     router.push("/login");
   };
 
   return (
     <AuthContext.Provider
-      value={{ firebaseUser, userProfile, loading, loginWithEmail, loginWithGoogle, logout }}
+      value={{ firebaseUser, userProfile, loading, loginWithEmail, loginWithGoogle, logout, refreshProfile }}
     >
       {children}
     </AuthContext.Provider>

@@ -64,6 +64,7 @@ backend/
    ```bash
    alembic upgrade head
    ```
+   > **Note:** Whenever you modify an SQLModel in `app/models/`, you MUST generate a new migration using `alembic revision --autogenerate -m "message"` and apply it with `alembic upgrade head`. Failing to do so will cause 500 errors.
 
 6. **Start the server:**
    ```bash

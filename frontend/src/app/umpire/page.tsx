@@ -22,7 +22,7 @@ export default function UmpireDashboard() {
   const [scoring, setScoring] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
-  const { eventState, secondsLeft, isActive } = useEventTimer(eventId);
+  const { eventState, secondsLeft, isActive, isTimeout } = useEventTimer(eventId);
   const liveRequests = useActionRequests(eventId);
   const pendingRequests = liveRequests.filter((r) => r.status === "PENDING");
 
@@ -43,6 +43,13 @@ export default function UmpireDashboard() {
     fetchTeams();
   }, []);
 
+  const getErrorText = (err: any, fallback: string) => {
+    const d = err?.response?.data?.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d)) return d[0]?.msg || fallback;
+    return fallback;
+  };
+
   const handleScoreSubmit = async (teamId: string) => {
     const data = runs[teamId];
     if (!data || !data.amount || !data.reason) return;
@@ -60,7 +67,7 @@ export default function UmpireDashboard() {
       setRuns((prev) => ({ ...prev, [teamId]: { amount: "", reason: "" } }));
       setMsg({ text: "Score updated successfully!", type: "success" });
     } catch (err: any) {
-      setMsg({ text: err?.response?.data?.detail || "Score update failed.", type: "error" });
+      setMsg({ text: getErrorText(err, "Score update failed."), type: "error" });
     } finally {
       setScoring(null);
     }
@@ -76,11 +83,14 @@ export default function UmpireDashboard() {
       });
       setMsg({ text: `Request ${outcome.toLowerCase()} successfully.`, type: "success" });
     } catch (err: any) {
-      setMsg({ text: err?.response?.data?.detail || "Resolution failed.", type: "error" });
+      setMsg({ text: getErrorText(err, "Resolution failed."), type: "error" });
     } finally {
       setResolving(null);
     }
   };
+
+  // Derive the display name for the current phase
+  const currentPhaseName = eventState?.phase_name || eventState?.current_phase || "—";
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] pb-8">
@@ -94,17 +104,31 @@ export default function UmpireDashboard() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {isActive && (
+          {isTimeout ? (
+            <div className="flex items-center gap-2 glass rounded-full px-4 py-1.5 border border-[#ff1744]/40 animate-pulse">
+              <span className="text-sm">🚨</span>
+              <span className="text-xs font-bold text-[#ff1744]">TIMEOUT — Power Play Ended</span>
+            </div>
+          ) : isActive ? (
             <div className="hidden sm:flex items-center gap-2 glass rounded-full px-4 py-1.5">
               <span className="w-2 h-2 rounded-full bg-[#00e676] pulse-green" />
+              <span className="text-xs text-slate-400 font-medium mr-1">{currentPhaseName}</span>
               <span className="text-xs font-mono font-bold text-[#00e676]">{formatTime(secondsLeft)}</span>
             </div>
-          )}
+          ) : null}
           <button onClick={logout} className="text-xs text-slate-400 hover:text-[#ff1744] transition-colors">Sign Out</button>
         </div>
       </header>
 
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+        {/* Timeout Banner */}
+        {isTimeout && (
+          <div className="rounded-2xl px-6 py-5 bg-[#ff1744]/10 border border-[#ff1744]/30 text-center animate-pulse">
+            <div className="text-2xl font-black text-[#ff1744]">🚨 TIMEOUT</div>
+            <div className="text-sm text-[#ff1744]/80 mt-1">Power Play Ended — {currentPhaseName}</div>
+          </div>
+        )}
+
         {msg && (
           <div className={`rounded-xl px-4 py-3 text-xs ${
             msg.type === "success" ? "bg-[#00e676]/10 border border-[#00e676]/20 text-[#00e676]" : "bg-[#ff1744]/10 border border-[#ff1744]/20 text-[#ff1744]"

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     # Firebase
     FIREBASE_PROJECT_ID: str = ""
+    FIREBASE_DATABASE_URL: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = "./service_account_key.json"
 
     # CORS

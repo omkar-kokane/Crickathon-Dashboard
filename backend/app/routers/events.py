@@ -20,14 +20,15 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 class EventCreate(BaseModel):
     name: str
-    org_id: uuid.UUID
+    org_id: Optional[uuid.UUID] = None
 
 
 class EventRead(BaseModel):
     event_id: uuid.UUID
-    org_id: uuid.UUID
+    org_id: Optional[uuid.UUID]
     name: str
     current_phase: EventPhase
+    phase_name: Optional[str]
     phase_end_time: Optional[datetime]
 
     class Config:
@@ -36,6 +37,7 @@ class EventRead(BaseModel):
 
 class PhaseUpdate(BaseModel):
     phase: EventPhase
+    phase_name: Optional[str] = None
     duration_minutes: Optional[int] = None  # None = no timer (e.g. PRE_MATCH, ENDED)
 
 
@@ -128,6 +130,7 @@ def update_phase(
         raise HTTPException(status_code=404, detail="Event not found.")
 
     event.current_phase = payload.phase
+    event.phase_name = payload.phase_name
     if payload.duration_minutes and payload.duration_minutes > 0:
         event.phase_end_time = datetime.now(timezone.utc) + timedelta(minutes=payload.duration_minutes)
     else:

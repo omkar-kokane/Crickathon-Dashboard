@@ -19,14 +19,20 @@ export default function AdminDashboard() {
   const [teams, setTeams] = useState<any[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
   const [newPhase, setNewPhase] = useState("POWERPLAY_1");
+  const [newPhaseName, setNewPhaseName] = useState("");
   const [duration, setDuration] = useState("30");
   const [newTeamName, setNewTeamName] = useState("");
   const [newEventName, setNewEventName] = useState("");
   const [walletAdjust, setWalletAdjust] = useState<Record<string, string>>({});
+  
+  // Provisioning State
+  const [provEmail, setProvEmail] = useState("");
+  const [provRole, setProvRole] = useState("ADMIN");
+  
   const [msg, setMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const { eventState, secondsLeft, isActive } = useEventTimer(selectedEvent?.event_id || "");
+  const { eventState, secondsLeft, isActive, isTimeout } = useEventTimer(selectedEvent?.event_id || "");
 
   useEffect(() => {
     if (userProfile && !["ADMIN", "SUPER_ADMIN"].includes(userProfile.role)) {
@@ -48,9 +54,18 @@ export default function AdminDashboard() {
 
   const eventTeams = teams.filter((t) => t.event_id === selectedEvent?.event_id);
 
-  const showMsg = (text: string, type: "success" | "error") => {
+  const showMsg = (text: string, type: "success" | "error", durationMs = 4000) => {
     setMsg({ text, type });
-    setTimeout(() => setMsg(null), 4000);
+    if (durationMs > 0) {
+      setTimeout(() => setMsg(null), durationMs);
+    }
+  };
+
+  const getErrorText = (err: any, fallback: string) => {
+    const d = err?.response?.data?.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d)) return d[0]?.msg || fallback;
+    return fallback;
   };
 
   const handlePhaseChange = async () => {
@@ -59,12 +74,13 @@ export default function AdminDashboard() {
     try {
       const res = await api.patch(`/api/events/${selectedEvent.event_id}/phase`, {
         phase: newPhase,
+        phase_name: newPhaseName || null,
         duration_minutes: parseInt(duration) || null,
       });
       setSelectedEvent(res.data);
-      showMsg(`Phase updated to ${newPhase}`, "success");
+      showMsg(`Phase updated to ${newPhaseName || newPhase}`, "success");
     } catch (err: any) {
-      showMsg(err?.response?.data?.detail || "Phase update failed.", "error");
+      showMsg(getErrorText(err, "Phase update failed."), "error");
     } finally {
       setLoading(false);
     }
@@ -83,7 +99,7 @@ export default function AdminDashboard() {
       setNewEventName("");
       showMsg("Event created!", "success");
     } catch (err: any) {
-      showMsg(err?.response?.data?.detail || "Failed to create event.", "error");
+      showMsg(getErrorText(err, "Failed to create event."), "error");
     } finally {
       setLoading(false);
     }
@@ -101,7 +117,30 @@ export default function AdminDashboard() {
       setNewTeamName("");
       showMsg(`Team created! Invite Code: ${res.data.invite_code}`, "success");
     } catch (err: any) {
-      showMsg(err?.response?.data?.detail || "Failed to create team.", "error");
+      showMsg(getErrorText(err, "Failed to create team."), "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleProvisionUser = async () => {
+    if (!provEmail) return;
+    setLoading(true);
+    try {
+      const res = await api.post("/api/users/assign-role", {
+        email: provEmail.toLowerCase(),
+        role: provRole,
+      });
+      const tempPw = res.data?.temporary_password;
+      setProvEmail("");
+      if (tempPw) {
+        // Keep credential banner visible for 2 minutes so user can copy
+        showMsg(`Granted ${provRole} to ${provEmail}!  |  Email: ${res.data.email}  |  Password: ${tempPw}`, "success", 0);
+      } else {
+        showMsg(`Successfully granted ${provRole} to ${provEmail}!`, "success");
+      }
+    } catch (err: any) {
+      showMsg(getErrorText(err, "Provisioning failed."), "error");
     } finally {
       setLoading(false);
     }
@@ -117,13 +156,16 @@ export default function AdminDashboard() {
       setWalletAdjust((prev) => ({ ...prev, [teamId]: "" }));
       showMsg("Wallet updated!", "success");
     } catch (err: any) {
-      showMsg(err?.response?.data?.detail || "Wallet update failed.", "error");
+      showMsg(getErrorText(err, "Wallet update failed."), "error");
     } finally {
       setLoading(false);
     }
   };
 
   const urgencyColor = secondsLeft < 300 ? "text-[#ff1744]" : secondsLeft < 600 ? "text-[#ffd600]" : "text-[#00e676]";
+
+  // Derive the display name for the current phase
+  const currentPhaseName = eventState?.phase_name || eventState?.current_phase || selectedEvent?.current_phase;
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] pb-10">
@@ -137,22 +179,44 @@ export default function AdminDashboard() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          {isActive && (
+          {isTimeout ? (
+            <div className="flex items-center gap-2 glass rounded-full px-4 py-1.5 border border-[#ff1744]/40 animate-pulse">
+              <span className="text-sm">🚨</span>
+              <span className="text-sm font-bold text-[#ff1744]">TIMEOUT — Power Play Ended</span>
+            </div>
+          ) : isActive ? (
             <div className="flex items-center gap-2 glass rounded-full px-4 py-1.5">
               <span className="w-2 h-2 rounded-full bg-[#00e676] pulse-green" />
+              <span className="text-xs text-slate-400 font-medium mr-1">{currentPhaseName}</span>
               <span className={`text-sm font-mono font-black ${urgencyColor}`}>{formatTime(secondsLeft)}</span>
             </div>
-          )}
+          ) : null}
           <button onClick={logout} className="text-xs text-slate-400 hover:text-[#ff1744] transition-colors">Sign Out</button>
         </div>
       </header>
 
       <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
         {msg && (
-          <div className={`rounded-xl px-4 py-3 text-sm font-medium ${
+          <div className={`rounded-xl px-4 py-3 text-sm font-medium flex items-center justify-between gap-3 ${
             msg.type === "success" ? "bg-[#00e676]/10 border border-[#00e676]/20 text-[#00e676]" : "bg-[#ff1744]/10 border border-[#ff1744]/20 text-[#ff1744]"
           }`}>
-            {msg.text}
+            <span className="flex-1 select-all">{msg.text}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => { navigator.clipboard.writeText(msg.text); }}
+                className="text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded-lg transition-all"
+                title="Copy to clipboard"
+              >
+                Copy
+              </button>
+              <button
+                onClick={() => setMsg(null)}
+                className="text-xs hover:opacity-70 transition-all font-bold text-lg leading-none"
+                title="Dismiss"
+              >
+                &times;
+              </button>
+            </div>
           </div>
         )}
 
@@ -189,9 +253,18 @@ export default function AdminDashboard() {
               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Match Engine</h2>
               {selectedEvent && (
                 <div className="text-xs text-[#00e676] mb-3 font-medium">
-                  Current: {eventState?.current_phase || selectedEvent.current_phase}
+                  Current: {currentPhaseName}
                 </div>
               )}
+
+              {/* Timeout Banner inside Match Engine */}
+              {isTimeout && (
+                <div className="mb-3 rounded-xl px-4 py-3 bg-[#ff1744]/10 border border-[#ff1744]/30 text-center animate-pulse">
+                  <div className="text-lg font-black text-[#ff1744]">🚨 TIMEOUT</div>
+                  <div className="text-xs text-[#ff1744]/80 mt-0.5">Power Play Ended</div>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <select
                   value={newPhase}
@@ -200,6 +273,13 @@ export default function AdminDashboard() {
                 >
                   {PHASES.map((p) => <option key={p} value={p}>{p.replace("_", " ")}</option>)}
                 </select>
+                <input
+                  type="text"
+                  placeholder="Phase name (e.g. Complete UI)"
+                  value={newPhaseName}
+                  onChange={(e) => setNewPhaseName(e.target.value)}
+                  className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-[#00e676]/50"
+                />
                 <div className="flex gap-2 items-center">
                   <input
                     type="number"
@@ -216,7 +296,7 @@ export default function AdminDashboard() {
                   disabled={loading || !selectedEvent}
                   className="w-full bg-[#00e676] hover:bg-[#00c853] disabled:opacity-50 text-black font-black py-2.5 rounded-xl transition-all text-sm pulse-green"
                 >
-                  🚀 Start Phase
+                  🚀 Start Power Play
                 </button>
               </div>
             </div>
@@ -236,6 +316,45 @@ export default function AdminDashboard() {
                 </button>
               </div>
             </div>
+
+            {/* Super Admin Panel */}
+            {userProfile?.role === "SUPER_ADMIN" && (
+              <div className="glass rounded-2xl p-5 border border-[#d500f9]/30">
+                <h2 className="text-xs font-bold text-[#d500f9] uppercase tracking-widest mb-3 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#d500f9] animate-pulse" />
+                  Grant Roles
+                </h2>
+                <div className="space-y-3">
+                  <input
+                    type="email"
+                    placeholder="User's Firebase Email"
+                    value={provEmail}
+                    onChange={(e) => setProvEmail(e.target.value)}
+                    className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[#d500f9]/50"
+                  />
+                  <div className="flex gap-2">
+                    <select
+                      value={provRole}
+                      onChange={(e) => setProvRole(e.target.value)}
+                      className="flex-1 bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[#d500f9]/50 cursor-pointer"
+                    >
+                      <option value="ADMIN">Admin</option>
+                      <option value="UMPIRE">Umpire</option>
+                    </select>
+                    <button 
+                      onClick={handleProvisionUser} 
+                      disabled={loading || !provEmail} 
+                      className="bg-[#d500f9] hover:bg-[#aa00ff] disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all"
+                    >
+                      Grant
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    *The user must have signed in to the application at least once before you can grant them a role.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Right Column — Global Leaderboard + Wallet Management */}
