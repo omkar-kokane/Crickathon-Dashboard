@@ -6,11 +6,12 @@ from sqlmodel import Session, select
 from pydantic import BaseModel
 
 from app.db.base import get_session
-from app.core.auth import require_role, get_current_user
+from app.core.auth import require_role, get_current_user, enforce_org_scope, is_super_admin, get_user_org_id
 from app.models.user import UserRole, User
 from app.models.team import Team
 from app.models.team_member import TeamMember
 from app.models.ledger import LedgerTransaction, TransactionType
+from app.models.event import Event
 
 router = APIRouter(prefix="/teams", tags=["teams"])
 
@@ -58,6 +59,11 @@ def create_team(
     current_user: dict = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
 ):
     """Admin: create a team. Generates a unique 6-char invite code automatically."""
+    event = session.get(Event, payload.event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Event")
+
     invite_code = secrets.token_hex(3).upper()  # 6-char hex e.g. "A3F1C8"
     # Ensure uniqueness
     while session.exec(select(Team).where(Team.invite_code == invite_code)).first():
@@ -79,19 +85,40 @@ def create_team(
 def list_teams(
     event_id: Optional[uuid.UUID] = None,
     session: Session = Depends(get_session),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     query = select(Team)
+
     if event_id:
+        event = session.get(Event, event_id)
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found.")
+        enforce_org_scope(current_user, event.org_id, resource_name="Event")
         query = query.where(Team.event_id == event_id)
+        return session.exec(query).all()
+
+    if is_super_admin(current_user):
+        return session.exec(query).all()
+
+    user_org_id = get_user_org_id(current_user)
+    if not user_org_id:
+        raise HTTPException(status_code=403, detail="Access denied. User has no organization scope.")
+
+    query = query.join(Event, Team.event_id == Event.event_id).where(Event.org_id == user_org_id)
     return session.exec(query).all()
 
 
 @router.get("/{team_id}", response_model=TeamRead)
-def get_team(team_id: uuid.UUID, session: Session = Depends(get_session), _: dict = Depends(get_current_user)):
+def get_team(team_id: uuid.UUID, session: Session = Depends(get_session), current_user: dict = Depends(get_current_user)):
     team = session.get(Team, team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found.")
+
+    event = session.get(Event, team.event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found for team.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Team")
+
     return team
 
 
@@ -109,13 +136,22 @@ def join_team(
     if not team:
         raise HTTPException(status_code=404, detail="Invalid invite code. Please check with your Admin.")
 
+    event = session.get(Event, team.event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found for invite code.")
+
+    # If user already has an org scope, it must match team event org.
+    if current_user.get("org_id"):
+        enforce_org_scope(current_user, event.org_id, resource_name="Team")
+
     # Get or create the User record
     user = session.exec(select(User).where(User.firebase_uid == current_user["uid"])).first()
     if not user:
         user = User(
             firebase_uid=current_user["uid"],
             email=current_user.get("email", ""),
-            role=UserRole.PARTICIPANT
+            role=UserRole.PARTICIPANT,
+            org_id=event.org_id,
         )
         session.add(user)
         session.flush()
@@ -133,6 +169,7 @@ def join_team(
     # Update user role to PARTICIPANT if not already assigned
     if user.role not in (UserRole.UMPIRE, UserRole.ADMIN, UserRole.SUPER_ADMIN):
         user.role = UserRole.PARTICIPANT
+        user.org_id = event.org_id
         session.add(user)
 
     session.commit()
@@ -155,6 +192,11 @@ def adjust_wallet(
     team = session.get(Team, team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found.")
+
+    event = session.get(Event, team.event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found for team.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Team")
 
     new_balance = team.wallet_balance + payload.amount
     if new_balance < 0:
@@ -189,12 +231,18 @@ def assign_umpire(
     team_id: uuid.UUID,
     payload: AssignUmpirePayload,
     session: Session = Depends(get_session),
-    _: dict = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
+    current_user: dict = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
 ):
     """Admin: assign an Umpire to a team."""
     team = session.get(Team, team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found.")
+
+    event = session.get(Event, team.event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found for team.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Team")
+
     team.umpire_id = payload.umpire_id
     session.add(team)
     session.commit()

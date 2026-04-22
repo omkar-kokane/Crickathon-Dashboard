@@ -1,4 +1,6 @@
 import logging
+import uuid
+from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlmodel import Session, select
@@ -53,4 +55,68 @@ def require_role(*roles: UserRole):
             )
         return current_user
     return checker
+
+
+def is_super_admin(current_user: dict) -> bool:
+    return current_user.get("role") == UserRole.SUPER_ADMIN.value
+
+
+def get_user_org_id(current_user: dict) -> Optional[uuid.UUID]:
+    org_id = current_user.get("org_id")
+    if not org_id:
+        return None
+    try:
+        return uuid.UUID(org_id)
+    except (ValueError, TypeError):
+        return None
+
+
+def enforce_org_scope(current_user: dict, resource_org_id: Optional[uuid.UUID], resource_name: str = "resource") -> None:
+    """
+    Ensure non-super-admin users can only access resources in their org.
+    """
+    if is_super_admin(current_user):
+        return
+
+    user_org_id = get_user_org_id(current_user)
+    if not user_org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. User has no organization scope.",
+        )
+
+    if not resource_org_id or resource_org_id != user_org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access denied. {resource_name} is outside your organization.",
+        )
+
+
+def enforce_org_on_create(current_user: dict, requested_org_id: Optional[uuid.UUID]) -> uuid.UUID:
+    """
+    For non-super-admin creation flows, force org_id to current user's org.
+    """
+    user_org_id = get_user_org_id(current_user)
+
+    if is_super_admin(current_user):
+        if not requested_org_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="org_id is required for SUPER_ADMIN operations.",
+            )
+        return requested_org_id
+
+    if not user_org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. User has no organization scope.",
+        )
+
+    if requested_org_id and requested_org_id != user_org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Cannot create resources for another organization.",
+        )
+
+    return user_org_id
 

@@ -6,12 +6,13 @@ from sqlmodel import Session, select
 from pydantic import BaseModel
 
 from app.db.base import get_session
-from app.core.auth import require_role, get_current_user
+from app.core.auth import require_role, get_current_user, enforce_org_scope
 from app.models.user import UserRole, User
 from app.models.team import Team
 from app.models.action_request import ActionRequest, ActionType, ActionStatus
 from app.models.action_config import ActionConfig
 from app.models.ledger import LedgerTransaction, TransactionType
+from app.models.event import Event
 from app.services.firebase_sync import push_action_request_update
 
 router = APIRouter(prefix="/requests", tags=["action-requests"])
@@ -61,6 +62,11 @@ def create_action_request(
     Participant: raise an action request (DRS, Timeout, Retention, Quick Single).
     The system pulls current config values from ActionConfig and snapshots them.
     """
+    event = session.get(Event, payload.event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Event")
+
     config = session.exec(
         select(ActionConfig).where(
             ActionConfig.event_id == payload.event_id,
@@ -74,6 +80,8 @@ def create_action_request(
     team = session.get(Team, payload.team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found.")
+    if team.event_id != payload.event_id:
+        raise HTTPException(status_code=400, detail="Team does not belong to this event.")
 
     # For Strategic Timeout: check if first_use_free applies
     point_cost = config.point_cost
@@ -116,8 +124,17 @@ def create_action_request(
 def get_team_requests(
     team_id: uuid.UUID,
     session: Session = Depends(get_session),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
+    team = session.get(Team, team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found.")
+
+    event = session.get(Event, team.event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found for team.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Team")
+
     requests = session.exec(
         select(ActionRequest)
         .where(ActionRequest.team_id == team_id)
@@ -137,6 +154,11 @@ def get_pending_requests(
         ActionRequest.event_id == event_id,
         ActionRequest.status == ActionStatus.PENDING,
     )
+    event = session.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Event")
+
     return session.exec(query).all()
 
 
@@ -158,6 +180,11 @@ def resolve_action_request(
     if request.status != ActionStatus.PENDING:
         raise HTTPException(status_code=400, detail=f"Cannot resolve a request with status: {request.status.value}")
 
+    event = session.get(Event, request.event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found for action request.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Action request")
+
     user = session.exec(select(User).where(User.firebase_uid == current_user["uid"])).first()
     if not user:
         raise HTTPException(status_code=404, detail="Authenticated user not found.")
@@ -165,6 +192,8 @@ def resolve_action_request(
     team = session.get(Team, request.team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found.")
+    if team.event_id != request.event_id:
+        raise HTTPException(status_code=400, detail="Action request references a mismatched team/event.")
 
     new_status = ActionStatus[payload.outcome]
     request.status = new_status
