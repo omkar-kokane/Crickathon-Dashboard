@@ -189,7 +189,12 @@ def adjust_wallet(
     Umpire: deduct wallet as part of action approval.
     All changes are recorded in the immutable ledger.
     """
-    team = session.get(Team, team_id)
+    # Lock the team row for the duration of this transaction to avoid race conditions.
+    team = session.exec(
+        select(Team)
+        .where(Team.team_id == team_id)
+        .with_for_update()
+    ).first()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found.")
 

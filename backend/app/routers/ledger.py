@@ -48,7 +48,12 @@ def add_run_entry(
     Umpire/Admin: Manually allocate or deduct Runs from a team.
     Creates an immutable ledger entry and updates Team.total_runs atomically.
     """
-    team = session.get(Team, payload.team_id)
+    # Lock the team row while mutating aggregate totals.
+    team = session.exec(
+        select(Team)
+        .where(Team.team_id == payload.team_id)
+        .with_for_update()
+    ).first()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found.")
 

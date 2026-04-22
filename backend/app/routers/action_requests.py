@@ -174,7 +174,12 @@ def resolve_action_request(
     On APPROVED: deducts wallet points and applies run changes atomically via the ledger.
     On REJECTED: no financial changes.
     """
-    request = session.get(ActionRequest, request_id)
+    # Lock request row so concurrent resolves cannot both process the same request.
+    request = session.exec(
+        select(ActionRequest)
+        .where(ActionRequest.request_id == request_id)
+        .with_for_update()
+    ).first()
     if not request:
         raise HTTPException(status_code=404, detail="Action request not found.")
     if request.status != ActionStatus.PENDING:
@@ -189,7 +194,12 @@ def resolve_action_request(
     if not user:
         raise HTTPException(status_code=404, detail="Authenticated user not found.")
 
-    team = session.get(Team, request.team_id)
+    # Lock team row before mutating wallet/runs.
+    team = session.exec(
+        select(Team)
+        .where(Team.team_id == request.team_id)
+        .with_for_update()
+    ).first()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found.")
     if team.event_id != request.event_id:
