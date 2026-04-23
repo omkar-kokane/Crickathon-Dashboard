@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useEventTimer } from "@/hooks/useEventTimer";
+import { useLiveTeams } from "@/hooks/useLiveTeams";
+import { useLiveEvents } from "@/hooks/useLiveEvents";
 import api from "@/lib/api";
 import { useRouter } from "next/navigation";
 
@@ -22,6 +24,8 @@ export default function AdminDashboard() {
   const [newPhaseName, setNewPhaseName] = useState("");
   const [duration, setDuration] = useState("30");
   const [newTeamName, setNewTeamName] = useState("");
+  const [umpires, setUmpires] = useState<any[]>([]);
+  const [selectedUmpireId, setSelectedUmpireId] = useState("");
   const [newEventName, setNewEventName] = useState("");
   const [walletAdjust, setWalletAdjust] = useState<Record<string, string>>({});
   
@@ -31,6 +35,7 @@ export default function AdminDashboard() {
   
   const [msg, setMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   const { eventState, secondsLeft, isActive, isTimeout } = useEventTimer(selectedEvent?.event_id || "");
 
@@ -38,21 +43,32 @@ export default function AdminDashboard() {
     if (userProfile && !["ADMIN", "SUPER_ADMIN"].includes(userProfile.role)) {
       router.replace("/");
     }
+    setMounted(true);
   }, [userProfile, router]);
 
   useEffect(() => {
     const load = async () => {
+      if (!userProfile) return;
       try {
-        const [evRes, tmRes] = await Promise.all([api.get("/api/events/"), api.get("/api/teams/")]);
+        const [evRes, tmRes, usRes] = await Promise.all([
+          api.get("/api/events/"),
+          api.get("/api/teams/"),
+          api.get("/api/users/")
+        ]);
         setEvents(evRes.data);
         setTeams(tmRes.data);
+        setUmpires(usRes.data.filter((u: any) => u.role === "UMPIRE"));
         if (evRes.data.length > 0 && !selectedEvent) setSelectedEvent(evRes.data[0]);
       } catch {}
     };
     load();
-  }, []);
+  }, [userProfile]);
 
-  const eventTeams = teams.filter((t) => t.event_id === selectedEvent?.event_id);
+  const liveEvents = useLiveEvents(events);
+  const liveTeams = useLiveTeams(selectedEvent?.event_id?.toLowerCase() || "", teams);
+  const eventTeams = liveTeams.filter((t: any) => 
+    t.event_id?.toLowerCase() === selectedEvent?.event_id?.toLowerCase()
+  );
 
   const showMsg = (text: string, type: "success" | "error", durationMs = 4000) => {
     setMsg({ text, type });
@@ -112,6 +128,7 @@ export default function AdminDashboard() {
       const res = await api.post("/api/teams/", {
         event_id: selectedEvent.event_id,
         name: newTeamName,
+        umpire_id: selectedUmpireId || undefined,
       });
       setTeams((prev) => [...prev, res.data]);
       setNewTeamName("");
@@ -132,6 +149,12 @@ export default function AdminDashboard() {
         role: provRole,
       });
       const tempPw = res.data?.temporary_password;
+      
+      // Instantly update the umpire dropdown if an umpire was created
+      if (provRole === "UMPIRE") {
+        setUmpires(prev => [...prev, res.data]);
+      }
+      
       setProvEmail("");
       if (tempPw) {
         // Keep credential banner visible for 2 minutes so user can copy
@@ -166,6 +189,8 @@ export default function AdminDashboard() {
 
   // Derive the display name for the current phase
   const currentPhaseName = eventState?.phase_name || eventState?.current_phase || selectedEvent?.current_phase;
+
+  if (!mounted) return null;
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] pb-10">
@@ -228,10 +253,10 @@ export default function AdminDashboard() {
               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Events</h2>
               <select
                 value={selectedEvent?.event_id || ""}
-                onChange={(e) => setSelectedEvent(events.find((ev) => ev.event_id === e.target.value))}
+                onChange={(e) => setSelectedEvent(liveEvents.find((ev: any) => ev.event_id === e.target.value))}
                 className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl px-3 py-2 text-sm text-white outline-none mb-3"
               >
-                {events.map((ev) => (
+                {liveEvents.map((ev: any) => (
                   <option key={ev.event_id} value={ev.event_id}>{ev.name}</option>
                 ))}
               </select>
@@ -304,16 +329,28 @@ export default function AdminDashboard() {
             {/* Create Team */}
             <div className="glass rounded-2xl p-5">
               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Add Team</h2>
-              <div className="flex gap-2">
+              <div className="space-y-2">
                 <input
                   placeholder="Team name..."
                   value={newTeamName}
                   onChange={(e) => setNewTeamName(e.target.value)}
-                  className="flex-1 bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[#00e676]/50"
+                  className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[#00e676]/50"
                 />
-                <button onClick={handleCreateTeam} disabled={loading} className="bg-[#00e676] hover:bg-[#00c853] text-black text-xs font-bold px-3 py-2 rounded-xl transition-all">
-                  +
-                </button>
+                <div className="flex gap-2">
+                  <select
+                    value={selectedUmpireId}
+                    onChange={(e) => setSelectedUmpireId(e.target.value)}
+                    className="flex-1 bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl px-3 py-2 text-xs text-slate-400 outline-none focus:border-[#00e676]/50"
+                  >
+                    <option value="">No Umpire (Assign Later)</option>
+                    {umpires.map(u => (
+                      <option key={u.user_id} value={u.user_id}>{u.email} {u.display_name ? `(${u.display_name})` : ""}</option>
+                    ))}
+                  </select>
+                  <button onClick={handleCreateTeam} disabled={loading} className="bg-[#00e676] hover:bg-[#00c853] text-black text-xs font-bold px-4 rounded-xl transition-all h-[34px]">
+                    Create
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -350,7 +387,7 @@ export default function AdminDashboard() {
                     </button>
                   </div>
                   <p className="text-[10px] text-slate-500 leading-tight">
-                    *The user must have signed in to the application at least once before you can grant them a role.
+                    *If the user doesn't have an account yet, one will be created automatically with a temporary password.
                   </p>
                 </div>
               </div>
@@ -400,7 +437,7 @@ export default function AdminDashboard() {
                           disabled={loading}
                           className="bg-[#ffd600]/10 border border-[#ffd600]/30 text-[#ffd600] text-xs font-bold px-2 py-1 rounded-lg hover:bg-[#ffd600]/20 transition-all"
                         >
-                          Set
+                          Add / Sub
                         </button>
                       </div>
                     </div>

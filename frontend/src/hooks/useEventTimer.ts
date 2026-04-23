@@ -30,8 +30,15 @@ export function useEventTimer(eventId: string): CountdownResult {
 
   // Subscribe to Firebase for real-time updates
   useEffect(() => {
-    if (!eventId) return;
-    const eventRef = ref(rtdb, `/events/${eventId}`);
+    if (!eventId) {
+      console.log("❌ NO EVENT ID"); //-------
+      return;
+    }
+    const pathId = eventId.toLowerCase();
+
+    console.log("🔥 LISTENING TO:", pathId); // ------------------
+
+    const eventRef = ref(rtdb, `/events/${pathId}`);
     const unsubscribe = onValue(eventRef, (snapshot) => {
       const data = snapshot.val();
       if (data) setEventState(data);

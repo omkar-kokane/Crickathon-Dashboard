@@ -72,6 +72,10 @@ def create_team(
     session.add(team)
     session.commit()
     session.refresh(team)
+
+    from app.services.firebase_sync import push_team_update
+    push_team_update(team)
+
     return team
 
 
@@ -93,6 +97,56 @@ def get_team(team_id: uuid.UUID, session: Session = Depends(get_session), _: dic
     if not team:
         raise HTTPException(status_code=404, detail="Team not found.")
     return team
+
+
+@router.get("/me/current", response_model=TeamRead)
+def get_my_team(
+    session: Session = Depends(get_session),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Participant: get the team the current user belongs to.
+    Queries TeamMember by user_id to find membership.
+    """
+    user = session.exec(select(User).where(User.firebase_uid == current_user["uid"])).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found in database.")
+
+    membership = session.exec(
+        select(TeamMember).where(TeamMember.user_id == user.user_id)
+    ).first()
+    if not membership:
+        raise HTTPException(status_code=404, detail="You are not a member of any team yet.")
+
+    team = session.get(Team, membership.team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found.")
+    return team
+
+
+@router.get("/umpire/assigned", response_model=List[TeamRead])
+def get_umpire_teams(
+    event_id: Optional[uuid.UUID] = None,
+    session: Session = Depends(get_session),
+    current_user: dict = Depends(require_role(UserRole.UMPIRE, UserRole.ADMIN, UserRole.SUPER_ADMIN)),
+):
+    """
+    Umpire: get only teams assigned to the current umpire.
+    Admin/SuperAdmin: returns all teams (they oversee everything).
+    """
+    user = session.exec(select(User).where(User.firebase_uid == current_user["uid"])).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    query = select(Team)
+    if event_id:
+        query = query.where(Team.event_id == event_id)
+
+    # Umpires only see their assigned teams; Admins see all
+    if user.role == UserRole.UMPIRE:
+        query = query.where(Team.umpire_id == user.user_id)
+
+    return session.exec(query).all()
 
 
 @router.post("/join", response_model=TeamRead)
@@ -181,6 +235,10 @@ def adjust_wallet(
     session.add(ledger_entry)
     session.commit()
     session.refresh(team)
+
+    from app.services.firebase_sync import push_team_update
+    push_team_update(team)
+
     return team
 
 
@@ -199,4 +257,8 @@ def assign_umpire(
     session.add(team)
     session.commit()
     session.refresh(team)
+
+    from app.services.firebase_sync import push_team_update
+    push_team_update(team)
+
     return team

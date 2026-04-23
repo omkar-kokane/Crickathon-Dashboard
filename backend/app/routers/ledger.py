@@ -68,6 +68,10 @@ def add_run_entry(
     session.add(entry)
     session.commit()
     session.refresh(entry)
+
+    from app.services.firebase_sync import push_team_update
+    push_team_update(team)
+
     return entry
 
 

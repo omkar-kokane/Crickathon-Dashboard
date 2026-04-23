@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { useEventTimer } from "@/hooks/useEventTimer";
 import { useActionRequests } from "@/hooks/useActionRequests";
+import { useEventTimer } from "@/hooks/useEventTimer";
+import { useLiveTeams } from "@/hooks/useLiveTeams";
 import api from "@/lib/api";
 import { useRouter } from "next/navigation";
 
@@ -37,8 +38,10 @@ export default function ParticipantDashboard() {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
-  const { eventState, secondsLeft, isActive, isTimeout } = useEventTimer(eventId);
-  const liveRequests = useActionRequests(eventId);
+  const { eventState, secondsLeft, isActive, isTimeout } = useEventTimer(eventId?.toLowerCase() || "");
+  const liveRequests = useActionRequests(eventId?.toLowerCase() || "");
+  const liveTeams = useLiveTeams(eventId?.toLowerCase() || "", team ? [team] : []);
+  const currentTeam = liveTeams.find((t) => t.team_id?.toLowerCase() === team?.team_id?.toLowerCase()) || team;
 
   // Redirect if not participant
   useEffect(() => {
@@ -47,19 +50,19 @@ export default function ParticipantDashboard() {
     }
   }, [userProfile, router]);
 
+  const refreshTeam = async () => {
+    try {
+      const res = await api.get("/api/teams/me/current");
+      setTeam(res.data);
+      setEventId(res.data.event_id);
+    } catch {}
+  };
+
   useEffect(() => {
-    const fetchTeam = async () => {
-      try {
-        const res = await api.get("/api/teams/");
-        // Get the team the participant belongs to
-        if (res.data.length > 0) {
-          setTeam(res.data[0]);
-          setEventId(res.data[0].event_id);
-        }
-      } catch {}
-    };
-    fetchTeam();
-  }, []);
+    if (userProfile) {
+      refreshTeam();
+    }
+  }, [userProfile]);
 
   const getErrorText = (err: any, fallback: string) => {
     const d = err?.response?.data?.detail;
@@ -79,6 +82,8 @@ export default function ParticipantDashboard() {
         type,
       });
       setActionMsg({ text: `${type.replace("_", " ")} request sent! Waiting for Umpire...`, type: "success" });
+      // Refresh team data so wallet/runs update immediately
+      await refreshTeam();
     } catch (err: any) {
       setActionMsg({ text: getErrorText(err, "Request failed."), type: "error" });
     } finally {
@@ -153,14 +158,14 @@ export default function ParticipantDashboard() {
           <div className="glass rounded-2xl p-5 text-center card-hover">
             <div className="text-xs text-slate-400 uppercase tracking-widest mb-2">Wallet Points</div>
             <div className="text-5xl font-black text-[#ffd600] text-glow-yellow">
-              {team?.wallet_balance ?? "—"}
+              {currentTeam?.wallet_balance ?? "—"}
             </div>
             <div className="text-xs text-slate-500 mt-1">pts remaining</div>
           </div>
           <div className="glass rounded-2xl p-5 text-center card-hover">
             <div className="text-xs text-slate-400 uppercase tracking-widest mb-2">Total Runs</div>
             <div className="text-5xl font-black text-[#00e676] text-glow-green">
-              {team?.total_runs ?? "—"}
+              {currentTeam?.total_runs ?? "—"}
             </div>
             <div className="text-xs text-slate-500 mt-1">scored</div>
           </div>

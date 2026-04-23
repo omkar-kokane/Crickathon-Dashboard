@@ -79,10 +79,10 @@ def create_event(
 
     # Seed default ActionConfig for all 4 action types
     defaults = {
-        ActionType.DRS: {"duration_minutes": 10, "point_cost": 10, "reward_runs": 10, "penalty_runs": -5, "first_use_free": False},
+        ActionType.DRS: {"duration_minutes": 10, "point_cost": 10, "reward_runs": 10, "penalty_runs": -5, "first_use_free": False, "max_uses_per_team": 2},
         ActionType.STRATEGIC_TIMEOUT: {"duration_minutes": 5, "point_cost": 10, "reward_runs": 0, "penalty_runs": 0, "first_use_free": True},
         ActionType.RETENTION: {"duration_minutes": 10, "point_cost": 10, "reward_runs": 0, "penalty_runs": 0, "first_use_free": False, "max_uses_per_team": 2},
-        ActionType.QUICK_SINGLE: {"duration_minutes": 5, "point_cost": 0, "reward_runs": 10, "penalty_runs": -10, "first_use_free": True},
+        ActionType.QUICK_SINGLE: {"duration_minutes": 10, "point_cost": 0, "reward_runs": 10, "penalty_runs": -10, "first_use_free": False},
     }
     for action_type, cfg in defaults.items():
         config = ActionConfig(event_id=event.event_id, action_type=action_type, **cfg)
@@ -90,6 +90,10 @@ def create_event(
 
     session.commit()
     session.refresh(event)
+
+    from app.services.firebase_sync import push_event_state
+    push_event_state(event)
+
     return event
 
 
