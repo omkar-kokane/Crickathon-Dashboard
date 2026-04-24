@@ -1,4 +1,5 @@
 import uuid
+import logging
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -21,6 +22,7 @@ from app.models.action_request import ActionType
 from app.services.firebase_sync import push_event_state
 
 router = APIRouter(prefix="/events", tags=["events"])
+logger = logging.getLogger(__name__)
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -164,7 +166,10 @@ def update_phase(
     session.refresh(event)
 
     # Push to Firebase so all clients get live update
-    push_event_state(event)
+    try:
+        push_event_state(event)
+    except Exception as exc:
+        logger.exception("Failed to push event state to Firebase for event %s: %s", event.event_id, exc)
 
     return event
 

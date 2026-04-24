@@ -1,4 +1,5 @@
 import uuid
+import logging
 from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,6 +17,7 @@ from app.models.event import Event
 from app.services.firebase_sync import push_action_request_update
 
 router = APIRouter(prefix="/requests", tags=["action-requests"])
+logger = logging.getLogger(__name__)
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -116,7 +118,10 @@ def create_action_request(
     session.refresh(request)
 
     # Notify umpire in real-time via Firebase
-    push_action_request_update(request)
+    try:
+        push_action_request_update(request)
+    except Exception as exc:
+        logger.exception("Failed to push action request update to Firebase for request %s: %s", request.request_id, exc)
     return request
 
 
@@ -254,5 +259,8 @@ def resolve_action_request(
     session.refresh(request)
 
     # Push update to Firebase so participant sees resolution in real-time
-    push_action_request_update(request)
+    try:
+        push_action_request_update(request)
+    except Exception as exc:
+        logger.exception("Failed to push resolved action request update to Firebase for request %s: %s", request.request_id, exc)
     return request
