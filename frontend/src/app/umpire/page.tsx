@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useActionRequests } from "@/hooks/useActionRequests";
 import { useEventTimer } from "@/hooks/useEventTimer";
+import { useLiveTeams } from "@/hooks/useLiveTeams";
 import api from "@/lib/api";
 import { useRouter } from "next/navigation";
 
@@ -25,6 +26,12 @@ export default function UmpireDashboard() {
   const { eventState, secondsLeft, isActive, isTimeout } = useEventTimer(eventId);
   const liveRequests = useActionRequests(eventId);
   const pendingRequests = liveRequests.filter((r) => r.status === "PENDING");
+  
+  // Only maintain teams that the umpire was initially assigned to
+  const liveTeamsUnfiltered = useLiveTeams(eventId?.toLowerCase() || "", teams);
+  const liveTeams = liveTeamsUnfiltered.filter((t: any) => 
+    teams.some(og => og.team_id?.toLowerCase() === t.team_id?.toLowerCase())
+  );
 
   useEffect(() => {
     if (userProfile && !["UMPIRE", "ADMIN", "SUPER_ADMIN"].includes(userProfile.role)) {
@@ -34,14 +41,15 @@ export default function UmpireDashboard() {
 
   useEffect(() => {
     const fetchTeams = async () => {
+      if (!userProfile) return;
       try {
-        const res = await api.get("/api/teams/");
+        const res = await api.get("/api/teams/umpire/assigned");
         setTeams(res.data);
         if (res.data.length > 0) setEventId(res.data[0].event_id);
       } catch {}
     };
     fetchTeams();
-  }, []);
+  }, [userProfile]);
 
   const getErrorText = (err: any, fallback: string) => {
     const d = err?.response?.data?.detail;
@@ -60,10 +68,9 @@ export default function UmpireDashboard() {
         team_id: teamId,
         amount: parseInt(data.amount),
         reason: data.reason,
+        event_id: eventId,
       });
-      // Refresh team data
-      const res = await api.get("/api/teams/");
-      setTeams(res.data);
+      // the useLiveTeams hook will automatically pull down the updated score 
       setRuns((prev) => ({ ...prev, [teamId]: { amount: "", reason: "" } }));
       setMsg({ text: "Score updated successfully!", type: "success" });
     } catch (err: any) {
@@ -199,7 +206,7 @@ export default function UmpireDashboard() {
         {/* Teams Scoring Panel */}
         <div className="space-y-4">
           <h2 className="text-sm font-bold text-white">Teams</h2>
-          {teams.map((team) => (
+          {liveTeams.map((team) => (
             <div key={team.team_id} className="glass rounded-2xl p-6 card-hover">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold text-white">{team.name}</h3>
@@ -219,7 +226,7 @@ export default function UmpireDashboard() {
               <div className="space-y-2">
                 <div className="flex gap-2">
                   <input
-                    type="number"
+                    type="text"
                     placeholder="+45 or -5"
                     value={runs[team.team_id]?.amount || ""}
                     onChange={(e) => setRuns((prev) => ({ ...prev, [team.team_id]: { ...prev[team.team_id], amount: e.target.value } }))}

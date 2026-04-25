@@ -20,6 +20,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from app.db.base import create_db_and_tables
+import logging
+
+@app.on_event("startup")
+def on_startup():
+    logging.info("Initializing database schema...")
+    create_db_and_tables()
+
 # ── Routers ────────────────────────────────────────────────────────────────────
 app.include_router(organizations.router, prefix="/api")
 app.include_router(users.router, prefix="/api")

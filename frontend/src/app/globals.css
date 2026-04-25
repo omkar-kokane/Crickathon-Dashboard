@@ -53,6 +53,10 @@
     box-shadow: 0 0 20px rgba(255, 23, 68, 0.2);
   }
 
+  .glow-purple {
+    box-shadow: 0 0 20px rgba(213, 0, 249, 0.2);
+  }
+
   .text-glow-green {
     text-shadow: 0 0 20px rgba(0, 230, 118, 0.6);
   }

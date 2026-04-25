@@ -29,7 +29,7 @@ class ActionRequestCreate(BaseModel):
 
 
 class ResolvePayload(BaseModel):
-    outcome: str  # "APPROVED" or "REJECTED" or "COMPLETED" or "FAILED"
+    outcome: ActionStatus  # APPROVED, REJECTED, COMPLETED, or FAILED
     notes: Optional[str] = None
     apply_reward: Optional[bool] = None   # For DRS/Quick Single: did they succeed?
 
@@ -85,6 +85,21 @@ def create_action_request(
     if team.event_id != payload.event_id:
         raise HTTPException(status_code=400, detail="Team does not belong to this event.")
 
+    # Enforce max_uses_per_team (DRS=2, Retention=2 per rulebook)
+    if config.max_uses_per_team is not None:
+        existing_uses = session.exec(
+            select(ActionRequest).where(
+                ActionRequest.team_id == payload.team_id,
+                ActionRequest.type == payload.type,
+                ActionRequest.status.in_([ActionStatus.PENDING, ActionStatus.APPROVED, ActionStatus.COMPLETED, ActionStatus.IN_PROGRESS]),
+            )
+        ).all()
+        if len(existing_uses) >= config.max_uses_per_team:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Maximum {config.max_uses_per_team} {payload.type.value.replace('_', ' ')} uses reached for this team.",
+            )
+
     # For Strategic Timeout: check if first_use_free applies
     point_cost = config.point_cost
     if config.first_use_free and payload.type == ActionType.STRATEGIC_TIMEOUT:
@@ -92,7 +107,7 @@ def create_action_request(
             select(ActionRequest).where(
                 ActionRequest.team_id == payload.team_id,
                 ActionRequest.type == ActionType.STRATEGIC_TIMEOUT,
-                ActionRequest.status.in_([ActionStatus.APPROVED, ActionStatus.COMPLETED]),
+                ActionRequest.status.in_([ActionStatus.PENDING, ActionStatus.APPROVED, ActionStatus.COMPLETED, ActionStatus.IN_PROGRESS]),
             )
         ).all()
         if len(existing_count) == 0:
@@ -210,13 +225,13 @@ def resolve_action_request(
     if team.event_id != request.event_id:
         raise HTTPException(status_code=400, detail="Action request references a mismatched team/event.")
 
-    new_status = ActionStatus[payload.outcome]
+    new_status = payload.outcome
     request.status = new_status
     request.resolved_at = datetime.now(timezone.utc)
     request.resolved_by_umpire_id = user.user_id
     request.notes = payload.notes
 
-    if new_status in (ActionStatus.APPROVED, ActionStatus.COMPLETED):
+    if new_status in (ActionStatus.APPROVED, ActionStatus.COMPLETED, ActionStatus.FAILED):
         # Deduct wallet if cost > 0
         if request.point_cost and request.point_cost > 0:
             if team.wallet_balance < request.point_cost:
@@ -259,8 +274,9 @@ def resolve_action_request(
     session.refresh(request)
 
     # Push update to Firebase so participant sees resolution in real-time
-    try:
-        push_action_request_update(request)
-    except Exception as exc:
-        logger.exception("Failed to push resolved action request update to Firebase for request %s: %s", request.request_id, exc)
+    push_action_request_update(request)
+    
+    from app.services.firebase_sync import push_team_update
+    push_team_update(team)
+    
     return request

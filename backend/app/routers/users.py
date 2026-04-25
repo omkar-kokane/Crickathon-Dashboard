@@ -162,6 +162,9 @@ def assign_role(
     session.refresh(user)
     set_user_role_claim(target_uid, payload.role.value)
 
+    from app.services.firebase_sync import push_user_update
+    push_user_update(user)
+
     # Return user data + temp password so the Super Admin can share it
     return AssignRoleResponse(
         user_id=user.user_id,
