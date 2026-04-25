@@ -1,4 +1,5 @@
 import uuid
+import logging
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -6,7 +7,14 @@ from sqlmodel import Session, select
 from pydantic import BaseModel
 
 from app.db.base import get_session
-from app.core.auth import require_role, get_current_user
+from app.core.auth import (
+    require_role,
+    get_current_user,
+    enforce_org_scope,
+    enforce_org_on_create,
+    is_super_admin,
+    get_user_org_id,
+)
 from app.models.user import UserRole
 from app.models.event import Event, EventPhase
 from app.models.action_config import ActionConfig
@@ -14,6 +22,7 @@ from app.models.action_request import ActionType
 from app.services.firebase_sync import push_event_state
 
 router = APIRouter(prefix="/events", tags=["events"])
+logger = logging.getLogger(__name__)
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -73,7 +82,9 @@ def create_event(
     current_user: dict = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
 ):
     """Admin: create a new event and seed default action configs."""
-    event = Event(org_id=payload.org_id, name=payload.name)
+    effective_org_id = enforce_org_on_create(current_user, payload.org_id)
+
+    event = Event(org_id=effective_org_id, name=payload.name)
     session.add(event)
     session.flush()  # get event_id before committing
 
@@ -101,19 +112,32 @@ def create_event(
 def list_events(
     org_id: Optional[uuid.UUID] = None,
     session: Session = Depends(get_session),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     query = select(Event)
-    if org_id:
-        query = query.where(Event.org_id == org_id)
+
+    if is_super_admin(current_user):
+        if org_id:
+            query = query.where(Event.org_id == org_id)
+        return session.exec(query).all()
+
+    user_org_id = get_user_org_id(current_user)
+    if not user_org_id:
+        raise HTTPException(status_code=403, detail="Access denied. User has no organization scope.")
+
+    if org_id and org_id != user_org_id:
+        raise HTTPException(status_code=403, detail="Access denied. Cannot list events outside your organization.")
+
+    query = query.where(Event.org_id == user_org_id)
     return session.exec(query).all()
 
 
 @router.get("/{event_id}", response_model=EventRead)
-def get_event(event_id: uuid.UUID, session: Session = Depends(get_session), _: dict = Depends(get_current_user)):
+def get_event(event_id: uuid.UUID, session: Session = Depends(get_session), current_user: dict = Depends(get_current_user)):
     event = session.get(Event, event_id)
     if not event:
         raise HTTPException(status_code=404, detail="Event not found.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Event")
     return event
 
 
@@ -122,7 +146,7 @@ def update_phase(
     event_id: uuid.UUID,
     payload: PhaseUpdate,
     session: Session = Depends(get_session),
-    _: dict = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
+    current_user: dict = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
 ):
     """
     Admin: update the current match phase and optionally set a timer.
@@ -132,6 +156,7 @@ def update_phase(
     event = session.get(Event, event_id)
     if not event:
         raise HTTPException(status_code=404, detail="Event not found.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Event")
 
     event.current_phase = payload.phase
     event.phase_name = payload.phase_name
@@ -145,7 +170,10 @@ def update_phase(
     session.refresh(event)
 
     # Push to Firebase so all clients get live update
-    push_event_state(event)
+    try:
+        push_event_state(event)
+    except Exception as exc:
+        logger.exception("Failed to push event state to Firebase for event %s: %s", event.event_id, exc)
 
     return event
 
@@ -156,8 +184,13 @@ def update_phase(
 def get_action_configs(
     event_id: uuid.UUID,
     session: Session = Depends(get_session),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
+    event = session.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Event")
+
     configs = session.exec(select(ActionConfig).where(ActionConfig.event_id == event_id)).all()
     return configs
 
@@ -168,9 +201,14 @@ def update_action_config(
     action_type: ActionType,
     payload: ActionConfigUpdate,
     session: Session = Depends(get_session),
-    _: dict = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
+    current_user: dict = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
 ):
     """Admin: update any of the 4 configurable parameters for a specific action type."""
+    event = session.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Event")
+
     config = session.exec(
         select(ActionConfig).where(
             ActionConfig.event_id == event_id,

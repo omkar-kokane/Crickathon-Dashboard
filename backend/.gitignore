@@ -9,9 +9,6 @@ venv/
 .env
 service_account_key.json
 
-# Alembic
-alembic/versions/*.py
-
 # Distribution / packaging
 dist/
 build/

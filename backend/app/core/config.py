@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]
 
     # Bootstrap (for creating the first SuperAdmin)
-    BOOTSTRAP_SECRET: str = "change-me-in-production"
+    BOOTSTRAP_SECRET: str = ""
 
     class Config:
         env_file = ".env"

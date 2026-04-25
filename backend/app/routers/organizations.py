@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 from pydantic import BaseModel
 
 from app.db.base import get_session
-from app.core.auth import require_role, get_current_user
+from app.core.auth import require_role, get_current_user, enforce_org_scope
 from app.models.user import UserRole
 from app.models.organization import Organization
 
@@ -51,9 +51,10 @@ def list_organizations(
 def get_organization(
     org_id: uuid.UUID,
     session: Session = Depends(get_session),
-    _: dict = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: dict = Depends(get_current_user),
 ):
     org = session.get(Organization, org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found.")
+    enforce_org_scope(current_user, org.org_id, resource_name="Organization")
     return org

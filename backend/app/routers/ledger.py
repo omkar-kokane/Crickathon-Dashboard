@@ -6,10 +6,11 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 
 from app.db.base import get_session
-from app.core.auth import require_role, get_current_user
+from app.core.auth import require_role, get_current_user, enforce_org_scope
 from app.models.user import UserRole, User
 from app.models.team import Team
 from app.models.ledger import LedgerTransaction, TransactionType
+from app.models.event import Event
 
 router = APIRouter(prefix="/ledger", tags=["ledger"])
 
@@ -47,9 +48,19 @@ def add_run_entry(
     Umpire/Admin: Manually allocate or deduct Runs from a team.
     Creates an immutable ledger entry and updates Team.total_runs atomically.
     """
-    team = session.get(Team, payload.team_id)
+    # Lock the team row while mutating aggregate totals.
+    team = session.exec(
+        select(Team)
+        .where(Team.team_id == payload.team_id)
+        .with_for_update()
+    ).first()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found.")
+
+    event = session.get(Event, team.event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found for team.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Team")
 
     user = session.exec(select(User).where(User.firebase_uid == current_user["uid"])).first()
     if not user:
@@ -79,9 +90,18 @@ def add_run_entry(
 def get_team_ledger(
     team_id: uuid.UUID,
     session: Session = Depends(get_session),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Get the full immutable ledger history for a specific team."""
+    team = session.get(Team, team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found.")
+
+    event = session.get(Event, team.event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found for team.")
+    enforce_org_scope(current_user, event.org_id, resource_name="Team")
+
     entries = session.exec(
         select(LedgerTransaction)
         .where(LedgerTransaction.team_id == team_id)

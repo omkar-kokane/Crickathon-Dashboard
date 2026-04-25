@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 from pydantic import BaseModel, EmailStr
 
 from app.db.base import get_session
-from app.core.auth import require_role, get_current_user
+from app.core.auth import get_current_user, is_super_admin, get_user_org_id
 from app.core.firebase import set_user_role_claim
 from app.models.user import User, UserRole
 from app.models.organization import Organization
@@ -64,8 +64,17 @@ def bootstrap_super_admin(
     One-time endpoint to create a Super Admin from your current active session.
     Protected by a secret key set in the .env file.
     """
+    if not settings.BOOTSTRAP_SECRET or settings.BOOTSTRAP_SECRET == "change-me-in-production":
+        raise HTTPException(status_code=503, detail="Bootstrap secret is not configured.")
+
     if payload.secret != settings.BOOTSTRAP_SECRET:
         raise HTTPException(status_code=403, detail="Invalid bootstrap secret.")
+
+    existing_super_admin = session.exec(
+        select(User).where(User.role == UserRole.SUPER_ADMIN)
+    ).first()
+    if existing_super_admin:
+        raise HTTPException(status_code=400, detail="Super admin already exists.")
 
     fb_uid = current_user["uid"]
     fb_email = current_user.get("email", "")
@@ -99,7 +108,7 @@ def get_me(current_user: dict = Depends(get_current_user), session: Session = De
 def assign_role(
     payload: AssignRolePayload,
     session: Session = Depends(get_session),
-    _: dict = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Admin/Super Admin: assign a role to a user.
@@ -109,6 +118,9 @@ def assign_role(
     from firebase_admin import auth
     import secrets
     import string
+
+    if payload.role == UserRole.SUPER_ADMIN and current_user.get("role") != UserRole.SUPER_ADMIN.value:
+        raise HTTPException(status_code=403, detail="Only a Super Admin can assign the Super Admin role.")
 
     temp_password = None
 
@@ -169,9 +181,23 @@ def assign_role(
 def list_users(
     org_id: Optional[uuid.UUID] = None,
     session: Session = Depends(get_session),
-    _: dict = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: dict = Depends(get_current_user),
 ):
     query = select(User)
+
+    if is_super_admin(current_user):
+        if org_id:
+            query = query.where(User.org_id == org_id)
+        return session.exec(query).all()
+
+    user_org_id = get_user_org_id(current_user)
+    if not user_org_id:
+        raise HTTPException(status_code=403, detail="Access denied. User has no organization scope.")
+
+    if org_id and org_id != user_org_id:
+        raise HTTPException(status_code=403, detail="Access denied. Cannot list users outside your organization.")
+
+    query = query.where(User.org_id == user_org_id)
     if org_id:
         query = query.where(User.org_id == org_id)
     return session.exec(query).all()
