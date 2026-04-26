@@ -93,3 +93,52 @@ def push_user_update(user) -> None:
         "role": user.role.value,
         # "is_active": user.is_active,
     })
+
+
+def push_auction_player_update(player) -> None:
+    """
+    Push star player auction state to Firebase.
+    Path: /auction/{event_id}/players/{player_id}
+    """
+    eid = str(player.event_id).lower()
+    pid = str(player.player_id).lower()
+    tid = str(player.sold_to_team_id).lower() if player.sold_to_team_id else None
+
+    _get_ref(f"/auction/{eid}/players/{pid}").set({
+        "player_id": pid,
+        "event_id": eid,
+        "name": player.name,
+        "bio": player.bio,
+        "specialization": player.specialization,
+        "photo_url": player.photo_url,
+        "base_price": player.base_price,
+        "sold_price": player.sold_price,
+        "sold_to_team_id": tid,
+        "status": player.status.value,
+        "display_order": player.display_order,
+    })
+
+
+def push_auction_current(player=None, event_id: str = None) -> None:
+    """
+    Push the currently active auction player to Firebase.
+    Path: /auction/{event_id}/current
+    Pass player=None to clear the current slot.
+    """
+    if player:
+        eid = str(player.event_id).lower()
+        pid = str(player.player_id).lower()
+        tid = str(player.sold_to_team_id).lower() if player.sold_to_team_id else None
+
+        _get_ref(f"/auction/{eid}/current").set({
+            "player_id": pid,
+            "name": player.name,
+            "base_price": player.base_price,
+            "sold_price": player.sold_price,
+            "sold_to_team_id": tid,
+            "status": player.status.value,
+        })
+    elif event_id:
+        eid = event_id.lower()
+        _get_ref(f"/auction/{eid}/current").set(None)
+

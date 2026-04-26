@@ -10,3 +10,4 @@ from app.models.team_member import TeamMember  # noqa
 from app.models.ledger import LedgerTransaction  # noqa
 from app.models.action_request import ActionRequest  # noqa
 from app.models.action_config import ActionConfig  # noqa
+from app.models.star_player import StarPlayer  # noqa

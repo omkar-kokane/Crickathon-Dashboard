@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.routers import organizations, users, events, teams, ledger, action_requests
+from app.routers import organizations, users, events, teams, ledger, action_requests, auction
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -35,6 +35,7 @@ app.include_router(events.router, prefix="/api")
 app.include_router(teams.router, prefix="/api")
 app.include_router(ledger.router, prefix="/api")
 app.include_router(action_requests.router, prefix="/api")
+app.include_router(auction.router, prefix="/api")
 
 
 @app.get("/health")
