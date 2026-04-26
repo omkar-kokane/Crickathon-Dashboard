@@ -5,10 +5,9 @@ from sqlmodel import Session, select
 from pydantic import BaseModel
 
 from app.db.base import get_session
-from app.core.auth import require_role, get_current_user, enforce_org_scope, is_super_admin
+from app.core.auth import require_role, enforce_org_scope
 from app.models.user import UserRole, User
 from app.models.team import Team
-from app.models.team_member import TeamMember
 from app.models.event import Event
 from app.models.ledger import LedgerTransaction, TransactionType
 from app.models.star_player import StarPlayer, AuctionStatus
@@ -140,6 +139,19 @@ def start_bidding(
             detail=f"Cannot start bidding on a player with status '{player.status.value}'. Must be UPCOMING or UNSOLD.",
         )
 
+    # Enforce: only one player can be BIDDING at a time per event
+    existing_bidding = session.exec(
+        select(StarPlayer).where(
+            StarPlayer.event_id == player.event_id,
+            StarPlayer.status == AuctionStatus.BIDDING,
+        )
+    ).first()
+    if existing_bidding:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Another player ('{existing_bidding.name}') is already being auctioned. Finish that bidding first.",
+        )
+
     player.status = AuctionStatus.BIDDING
     session.add(player)
     session.commit()
@@ -165,7 +177,12 @@ def sell_player(
     - amount must be in increments of 5
     - team must have sufficient wallet balance
     """
-    player = _get_player_or_404(player_id, session)
+    # Lock the player row to prevent double-sell race conditions
+    player = session.exec(
+        select(StarPlayer).where(StarPlayer.player_id == player_id).with_for_update()
+    ).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Star player not found.")
     _enforce_event_scope(player, session, current_user)
 
     if player.status != AuctionStatus.BIDDING:
@@ -191,6 +208,13 @@ def sell_player(
     ).first()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found.")
+
+    # Verify team belongs to the same event as the player
+    if team.event_id != player.event_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Team '{team.name}' belongs to a different event than this player.",
+        )
 
     if team.wallet_balance < payload.amount:
         raise HTTPException(
@@ -222,13 +246,9 @@ def sell_player(
     player.status = AuctionStatus.SOLD
     session.add(player)
 
-    # 4. Add to TeamMember as icon player
-    member = TeamMember(
-        team_id=team.team_id,
-        user_id=admin_user.user_id,
-        is_icon_player=True,
-    )
-    session.add(member)
+    # 4. Auction result is recorded on the StarPlayer record itself.
+    # Do not create a TeamMember row: StarPlayer is not linked to a User,
+    # and using admin_user.user_id would incorrectly add the admin as a team member.
 
     session.commit()
     session.refresh(player)
@@ -237,7 +257,8 @@ def sell_player(
     from app.services.firebase_sync import push_team_update, push_auction_player_update, push_auction_current
     push_team_update(team)
     push_auction_player_update(player)
-    push_auction_current(player)
+    # Clear /current so spectators don't see stale SOLD state
+    push_auction_current(None, event_id=str(player.event_id))
 
     return player
 
@@ -286,6 +307,17 @@ def delete_star_player(
             detail=f"Cannot delete a player with status '{player.status.value}'. Only UPCOMING or UNSOLD players can be removed.",
         )
 
+    # Capture IDs before deleting for Firebase cleanup
+    event_id = str(player.event_id)
+    deleted_player_id = str(player.player_id)
+
     session.delete(player)
     session.commit()
+
+    # Clean up Firebase RTDB to prevent ghost players in spectator/admin views
+    from app.services.firebase_sync import _get_ref
+    eid = event_id.lower()
+    pid = deleted_player_id.lower()
+    _get_ref(f"/auction/{eid}/players/{pid}").delete()
+
     return None

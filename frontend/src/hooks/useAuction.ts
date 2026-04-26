@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { ref, onValue, off } from "firebase/database";
+import { useEffect, useState } from "react";
+import { ref, onValue } from "firebase/database";
 import { rtdb } from "@/lib/firebase";
 
 interface AuctionPlayer {
@@ -37,7 +37,7 @@ export function useAuction(eventId: string) {
 
     // Listen to all auction players
     const playersRef = ref(rtdb, `/auction/${eid}/players`);
-    const playersHandler = onValue(playersRef, (snapshot) => {
+    const unsubPlayers = onValue(playersRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
         const list: AuctionPlayer[] = Object.values(data);
@@ -50,14 +50,14 @@ export function useAuction(eventId: string) {
 
     // Listen to current player on the auction block
     const currentRef = ref(rtdb, `/auction/${eid}/current`);
-    const currentHandler = onValue(currentRef, (snapshot) => {
+    const unsubCurrent = onValue(currentRef, (snapshot) => {
       const data = snapshot.val();
       setCurrentPlayer(data || null);
     });
 
     return () => {
-      off(playersRef);
-      off(currentRef);
+      unsubPlayers();
+      unsubCurrent();
     };
   }, [eventId]);
 

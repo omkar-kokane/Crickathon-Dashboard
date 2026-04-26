@@ -22,8 +22,7 @@ export default function AdminAuctionPage() {
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  const { players: livePlayers, currentPlayer, soldPlayers, unsoldPlayers, upcomingPlayers, biddingPlayer } =
-    useAuction(selectedEvent?.event_id || "");
+  const { players: livePlayers } = useAuction(selectedEvent?.event_id || "");
   const liveTeams = useLiveTeams(selectedEvent?.event_id?.toLowerCase() || "", teams);
   const eventTeams = liveTeams.filter(
     (t: any) => t.event_id?.toLowerCase() === selectedEvent?.event_id?.toLowerCase()
@@ -312,7 +311,7 @@ export default function AdminAuctionPage() {
             <div className="glass rounded-2xl p-5">
               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">💰 Team Purses</h2>
               <div className="space-y-2">
-                {eventTeams.sort((a: any, b: any) => b.wallet_balance - a.wallet_balance).map((team: any) => {
+                {[...eventTeams].sort((a: any, b: any) => b.wallet_balance - a.wallet_balance).map((team: any) => {
                   const teamSold = sold.filter((p: any) => p.sold_to_team_id?.toLowerCase() === team.team_id?.toLowerCase());
                   return (
                     <div key={team.team_id} className="bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl p-3 flex items-center justify-between">

@@ -2,7 +2,7 @@
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuction } from "@/hooks/useAuction";
-import { ref, onValue, off } from "firebase/database";
+import { ref, onValue } from "firebase/database";
 import { rtdb } from "@/lib/firebase";
 
 interface TeamInfo {
@@ -24,20 +24,24 @@ function AuctionSpectatorInner() {
   useEffect(() => {
     if (!eventId) return;
     const teamsRef = ref(rtdb, `/teams/${eventId.toLowerCase()}`);
-    const handler = onValue(teamsRef, (snapshot) => {
+    const unsub = onValue(teamsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) setTeams(Object.values(data));
     });
-    return () => off(teamsRef);
+    return () => unsub();
   }, [eventId]);
 
   useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     if (currentPlayer?.status === "SOLD" && !soldAnimation) {
       setSoldAnimation(true);
       setLastSoldPlayer(currentPlayer);
-      setTimeout(() => setSoldAnimation(false), 4000);
+      timeoutId = setTimeout(() => setSoldAnimation(false), 4000);
     }
-  }, [currentPlayer?.status]);
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [currentPlayer, soldAnimation]);
 
   const getTeamName = (teamId: string | null | undefined) => {
     if (!teamId) return "—";
@@ -150,7 +154,7 @@ function AuctionSpectatorInner() {
             <div className="glass rounded-2xl p-5">
               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">💰 Team Purses</h2>
               <div className="space-y-2">
-                {teams.sort((a, b) => b.wallet_balance - a.wallet_balance).map((team) => {
+                {[...teams].sort((a, b) => b.wallet_balance - a.wallet_balance).map((team) => {
                   const teamBought = soldPlayers.filter((p) => p.sold_to_team_id === team.team_id);
                   return (
                     <div key={team.team_id} className="bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl p-3 flex items-center justify-between">
