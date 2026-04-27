@@ -165,6 +165,39 @@ export default function LoginPage() {
 
         {/* Manual Login Form */}
         <div className="max-w-sm mx-auto glass rounded-2xl p-6">
+          {/* Quick Login Dropdown for Admins */}
+          <div className="mb-5">
+            <label className="block text-xs text-slate-400 mb-2">Quick Login</label>
+            <select
+              className="w-full bg-[#0a0a0f] border border-[#2a2a3a] focus:border-[#00e676]/50 rounded-xl px-4 py-2.5 text-sm text-white outline-none transition-all duration-200 cursor-pointer"
+              onChange={(e) => {
+                const roleKey = e.target.value;
+                if (!roleKey) return;
+                const account = TEST_ACCOUNTS.find(a => a.roleKey === roleKey);
+                if (account) {
+                  handleQuickLogin(account);
+                  // Reset select back to default after click
+                  e.target.value = "";
+                }
+              }}
+              defaultValue=""
+              disabled={loading}
+            >
+              <option value="" disabled>Select a role to quick login...</option>
+              <option value="SUPER_ADMIN">Super Admin</option>
+              <option value="ADMIN">Admin</option>
+            </select>
+          </div>
+
+          <div className="relative mb-5">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-[#2a2a3a]" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="bg-[#111118] px-3 text-slate-500">or sign in manually</span>
+            </div>
+          </div>
+
           {/* Google Sign-In */}
           <button
             id="google-signin-btn"
