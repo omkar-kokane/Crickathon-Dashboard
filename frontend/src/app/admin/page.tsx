@@ -1,11 +1,12 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useEventTimer } from "@/hooks/useEventTimer";
 import { useLiveTeams } from "@/hooks/useLiveTeams";
 import { useLiveEvents } from "@/hooks/useLiveEvents";
 import api from "@/lib/api";
 import { useRouter } from "next/navigation";
+import type { CrickathonEvent, Team, UmpireUser } from "@/types";
 
 const PHASES = ["PRE_MATCH", "POWERPLAY_1", "POWERPLAY_2", "POWERPLAY_3", "POWERPLAY_4", "SUPER_OVER", "ENDED"];
 
@@ -17,14 +18,14 @@ function formatTime(s: number) {
 export default function AdminDashboard() {
   const { userProfile, logout } = useAuth();
   const router = useRouter();
-  const [events, setEvents] = useState<any[]>([]);
-  const [teams, setTeams] = useState<any[]>([]);
-  const [selectedEvent, setSelectedEvent] = useState<any>(null);
+  const [events, setEvents] = useState<CrickathonEvent[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<CrickathonEvent | null>(null);
   const [newPhase, setNewPhase] = useState("POWERPLAY_1");
   const [newPhaseName, setNewPhaseName] = useState("");
   const [duration, setDuration] = useState("30");
   const [newTeamName, setNewTeamName] = useState("");
-  const [umpires, setUmpires] = useState<any[]>([]);
+  const [umpires, setUmpires] = useState<UmpireUser[]>([]);
   const [selectedUmpireId, setSelectedUmpireId] = useState("");
   const [newEventName, setNewEventName] = useState("");
   const [walletAdjust, setWalletAdjust] = useState<Record<string, string>>({});
@@ -46,27 +47,30 @@ export default function AdminDashboard() {
     setMounted(true);
   }, [userProfile, router]);
 
-  useEffect(() => {
-    const load = async () => {
-      if (!userProfile) return;
-      try {
-        const [evRes, tmRes, usRes] = await Promise.all([
-          api.get("/api/events/"),
-          api.get("/api/teams/"),
-          api.get("/api/users/")
-        ]);
-        setEvents(evRes.data);
-        setTeams(tmRes.data);
-        setUmpires(usRes.data.filter((u: any) => u.role === "UMPIRE"));
-        if (evRes.data.length > 0 && !selectedEvent) setSelectedEvent(evRes.data[0]);
-      } catch {}
-    };
-    load();
+  const loadData = useCallback(async () => {
+    if (!userProfile) return;
+    try {
+      const [evRes, tmRes, usRes] = await Promise.all([
+        api.get("/api/events/"),
+        api.get("/api/teams/"),
+        api.get("/api/users/")
+      ]);
+      setEvents(evRes.data);
+      setTeams(tmRes.data);
+      setUmpires(usRes.data.filter((u: UmpireUser) => u.role === "UMPIRE"));
+      if (evRes.data.length > 0) {
+        setSelectedEvent((prev) => prev ?? evRes.data[0]);
+      }
+    } catch { /* handled by auth interceptor */ }
   }, [userProfile]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const liveEvents = useLiveEvents(events);
   const liveTeams = useLiveTeams(selectedEvent?.event_id?.toLowerCase() || "", teams);
-  const eventTeams = liveTeams.filter((t: any) => 
+  const eventTeams = liveTeams.filter((t) => 
     t.event_id?.toLowerCase() === selectedEvent?.event_id?.toLowerCase()
   );
 
@@ -77,10 +81,11 @@ export default function AdminDashboard() {
     }
   };
 
-  const getErrorText = (err: any, fallback: string) => {
-    const d = err?.response?.data?.detail;
+  const getErrorText = (err: Record<string, unknown>, fallback: string) => {
+    const resp = err?.response as Record<string, unknown> | undefined;
+    const d = (resp?.data as Record<string, unknown>)?.detail;
     if (typeof d === "string") return d;
-    if (Array.isArray(d)) return d[0]?.msg || fallback;
+    if (Array.isArray(d)) return (d[0] as Record<string, string>)?.msg || fallback;
     return fallback;
   };
 
@@ -95,8 +100,8 @@ export default function AdminDashboard() {
       });
       setSelectedEvent(res.data);
       showMsg(`Phase updated to ${newPhaseName || newPhase}`, "success");
-    } catch (err: any) {
-      showMsg(getErrorText(err, "Phase update failed."), "error");
+    } catch (err: unknown) {
+      showMsg(getErrorText(err as Record<string, unknown>, "Phase update failed."), "error");
     } finally {
       setLoading(false);
     }
@@ -114,8 +119,8 @@ export default function AdminDashboard() {
       setSelectedEvent(res.data);
       setNewEventName("");
       showMsg("Event created!", "success");
-    } catch (err: any) {
-      showMsg(getErrorText(err, "Failed to create event."), "error");
+    } catch (err: unknown) {
+      showMsg(getErrorText(err as Record<string, unknown>, "Failed to create event."), "error");
     } finally {
       setLoading(false);
     }
@@ -133,8 +138,8 @@ export default function AdminDashboard() {
       setTeams((prev) => [...prev, res.data]);
       setNewTeamName("");
       showMsg(`Team created! Invite Code: ${res.data.invite_code}`, "success");
-    } catch (err: any) {
-      showMsg(getErrorText(err, "Failed to create team."), "error");
+    } catch (err: unknown) {
+      showMsg(getErrorText(err as Record<string, unknown>, "Failed to create team."), "error");
     } finally {
       setLoading(false);
     }
@@ -162,8 +167,8 @@ export default function AdminDashboard() {
       } else {
         showMsg(`Successfully granted ${provRole} to ${provEmail}!`, "success");
       }
-    } catch (err: any) {
-      showMsg(getErrorText(err, "Provisioning failed."), "error");
+    } catch (err: unknown) {
+      showMsg(getErrorText(err as Record<string, unknown>, "Provisioning failed."), "error");
     } finally {
       setLoading(false);
     }
@@ -178,8 +183,8 @@ export default function AdminDashboard() {
       setTeams(res.data);
       setWalletAdjust((prev) => ({ ...prev, [teamId]: "" }));
       showMsg("Wallet updated!", "success");
-    } catch (err: any) {
-      showMsg(getErrorText(err, "Wallet update failed."), "error");
+    } catch (err: unknown) {
+      showMsg(getErrorText(err as Record<string, unknown>, "Wallet update failed."), "error");
     } finally {
       setLoading(false);
     }
@@ -253,10 +258,10 @@ export default function AdminDashboard() {
               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Events</h2>
               <select
                 value={selectedEvent?.event_id || ""}
-                onChange={(e) => setSelectedEvent(liveEvents.find((ev: any) => ev.event_id === e.target.value))}
+                onChange={(e) => setSelectedEvent(liveEvents.find((ev) => ev.event_id === e.target.value) || null)}
                 className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl px-3 py-2 text-sm text-white outline-none mb-3"
               >
-                {liveEvents.map((ev: any) => (
+                {liveEvents.map((ev) => (
                   <option key={ev.event_id} value={ev.event_id}>{ev.name}</option>
                 ))}
               </select>
@@ -296,7 +301,7 @@ export default function AdminDashboard() {
                   onChange={(e) => setNewPhase(e.target.value)}
                   className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl px-3 py-2 text-sm text-white outline-none"
                 >
-                  {PHASES.map((p) => <option key={p} value={p}>{p.replace("_", " ")}</option>)}
+                  {PHASES.map((p) => <option key={p} value={p}>{p.replaceAll("_", " ")}</option>)}
                 </select>
                 <input
                   type="text"
@@ -387,7 +392,7 @@ export default function AdminDashboard() {
                     </button>
                   </div>
                   <p className="text-[10px] text-slate-500 leading-tight">
-                    *If the user doesn't have an account yet, one will be created automatically with a temporary password.
+                    *If the user doesn&apos;t have an account yet, one will be created automatically with a temporary password.
                   </p>
                 </div>
               </div>

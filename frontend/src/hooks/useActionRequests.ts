@@ -2,15 +2,7 @@
 import { useEffect, useState } from "react";
 import { ref, onValue } from "firebase/database";
 import { rtdb } from "@/lib/firebase";
-
-interface ActionRequestUpdate {
-  request_id: string;
-  team_id: string;
-  type: string;
-  status: string;
-  created_at: string;
-  resolved_at: string | null;
-}
+import type { ActionRequestUpdate } from "@/types";
 
 /**
  * Subscribes to Firebase for all active action requests for a given event.
@@ -20,7 +12,7 @@ export function useActionRequests(eventId: string): ActionRequestUpdate[] {
   const [requests, setRequests] = useState<ActionRequestUpdate[]>([]);
 
   useEffect(() => {
-    if (!eventId) return;
+    if (!eventId || !rtdb) return;
     
     const pathId = eventId.toLowerCase();
     const reqRef = ref(rtdb, `/action_requests/${pathId}`);
@@ -29,12 +21,15 @@ export function useActionRequests(eventId: string): ActionRequestUpdate[] {
       const data = snapshot.val();
       if (data) {
         // Normalize IDs in the returned array as well
-        const arr: ActionRequestUpdate[] = Object.values(data).map((req: any) => ({
-          ...req,
-          request_id: req.request_id?.toLowerCase(),
-          team_id: req.team_id?.toLowerCase(),
-          event_id: req.event_id?.toLowerCase()
-        }));
+        const arr: ActionRequestUpdate[] = Object.values(data).map((req: unknown) => {
+          const r = req as Record<string, unknown>;
+          return {
+            ...r,
+            request_id: (r.request_id as string)?.toLowerCase(),
+            team_id: (r.team_id as string)?.toLowerCase(),
+            event_id: (r.event_id as string)?.toLowerCase(),
+          } as ActionRequestUpdate;
+        });
         
         // Show most recent first
         setRequests(arr.sort((a, b) =>

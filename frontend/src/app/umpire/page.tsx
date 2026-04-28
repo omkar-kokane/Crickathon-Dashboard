@@ -1,11 +1,12 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useActionRequests } from "@/hooks/useActionRequests";
 import { useEventTimer } from "@/hooks/useEventTimer";
 import { useLiveTeams } from "@/hooks/useLiveTeams";
 import api from "@/lib/api";
 import { useRouter } from "next/navigation";
+import type { Team } from "@/types";
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60).toString().padStart(2, "0");
@@ -16,7 +17,7 @@ function formatTime(seconds: number) {
 export default function UmpireDashboard() {
   const { userProfile, logout } = useAuth();
   const router = useRouter();
-  const [teams, setTeams] = useState<any[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [eventId, setEventId] = useState<string>("");
   const [runs, setRuns] = useState<Record<string, { amount: string; reason: string }>>({});
   const [resolving, setResolving] = useState<string | null>(null);
@@ -29,7 +30,7 @@ export default function UmpireDashboard() {
   
   // Only maintain teams that the umpire was initially assigned to
   const liveTeamsUnfiltered = useLiveTeams(eventId?.toLowerCase() || "", teams);
-  const liveTeams = liveTeamsUnfiltered.filter((t: any) => 
+  const liveTeams = liveTeamsUnfiltered.filter((t) => 
     teams.some(og => og.team_id?.toLowerCase() === t.team_id?.toLowerCase())
   );
 
@@ -39,42 +40,50 @@ export default function UmpireDashboard() {
     }
   }, [userProfile, router]);
 
-  useEffect(() => {
-    const fetchTeams = async () => {
-      if (!userProfile) return;
-      try {
-        const res = await api.get("/api/teams/umpire/assigned");
-        setTeams(res.data);
-        if (res.data.length > 0) setEventId(res.data[0].event_id);
-      } catch {}
-    };
-    fetchTeams();
+  const fetchTeams = useCallback(async () => {
+    if (!userProfile) return;
+    try {
+      const res = await api.get("/api/teams/umpire/assigned");
+      setTeams(res.data);
+      if (res.data.length > 0) setEventId(res.data[0].event_id);
+    } catch { /* handled by auth interceptor */ }
   }, [userProfile]);
 
-  const getErrorText = (err: any, fallback: string) => {
-    const d = err?.response?.data?.detail;
+  useEffect(() => {
+    fetchTeams();
+  }, [fetchTeams]);
+
+
+
+  const getErrorText = (err: Record<string, unknown>, fallback: string) => {
+    const resp = err?.response as Record<string, unknown> | undefined;
+    const d = (resp?.data as Record<string, unknown>)?.detail;
     if (typeof d === "string") return d;
-    if (Array.isArray(d)) return d[0]?.msg || fallback;
+    if (Array.isArray(d)) return (d[0] as Record<string, string>)?.msg || fallback;
     return fallback;
   };
 
   const handleScoreSubmit = async (teamId: string) => {
     const data = runs[teamId];
     if (!data || !data.amount || !data.reason) return;
+    const teamName = liveTeams.find(t => t.team_id === teamId)?.name || "Team";
+    const amount = parseInt(data.amount);
     setScoring(teamId);
     setMsg(null);
     try {
       await api.post("/api/ledger/runs", {
         team_id: teamId,
-        amount: parseInt(data.amount),
+        amount: amount,
         reason: data.reason,
         event_id: eventId,
       });
       // the useLiveTeams hook will automatically pull down the updated score 
       setRuns((prev) => ({ ...prev, [teamId]: { amount: "", reason: "" } }));
-      setMsg({ text: "Score updated successfully!", type: "success" });
-    } catch (err: any) {
-      setMsg({ text: getErrorText(err, "Score update failed."), type: "error" });
+      const sign = amount >= 0 ? "+" : "";
+      setMsg({ text: `${sign}${amount} runs → ${teamName} (${data.reason})`, type: "success" });
+      console.log(`[Umpire] Score updated: ${sign}${amount} runs → ${teamName} | Reason: ${data.reason}`);
+    } catch (err: unknown) {
+      setMsg({ text: getErrorText(err as Record<string, unknown>, "Score update failed."), type: "error" });
     } finally {
       setScoring(null);
     }
@@ -89,8 +98,9 @@ export default function UmpireDashboard() {
         apply_reward: applyReward,
       });
       setMsg({ text: `Request ${outcome.toLowerCase()} successfully.`, type: "success" });
-    } catch (err: any) {
-      setMsg({ text: getErrorText(err, "Resolution failed."), type: "error" });
+      console.log(`[Umpire] Request ${requestId} resolved: ${outcome}`);
+    } catch (err: unknown) {
+      setMsg({ text: getErrorText(err as Record<string, unknown>, "Resolution failed."), type: "error" });
     } finally {
       setResolving(null);
     }
@@ -136,11 +146,13 @@ export default function UmpireDashboard() {
           </div>
         )}
 
+        {/* Auto-dismissing notification */}
         {msg && (
-          <div className={`rounded-xl px-4 py-3 text-xs ${
+          <div className={`rounded-xl px-4 py-3 text-xs flex items-center justify-between transition-all ${
             msg.type === "success" ? "bg-[#00e676]/10 border border-[#00e676]/20 text-[#00e676]" : "bg-[#ff1744]/10 border border-[#ff1744]/20 text-[#ff1744]"
           }`}>
-            {msg.text}
+            <span>{msg.text}</span>
+            <button onClick={() => setMsg(null)} className="ml-3 opacity-60 hover:opacity-100 font-bold">&times;</button>
           </div>
         )}
 
@@ -157,7 +169,7 @@ export default function UmpireDashboard() {
                   <div key={req.request_id} className="bg-[#0a0a0f] rounded-xl p-4 border border-[#2a2a3a]">
                     <div className="flex items-center justify-between mb-3">
                       <div>
-                        <span className="font-bold text-white text-sm">{req.type.replace("_", " ")}</span>
+                        <span className="font-bold text-white text-sm">{req.type.replaceAll("_", " ")}</span>
                         <p className="text-xs text-slate-400">{teamName} • {new Date(req.created_at).toLocaleTimeString()}</p>
                       </div>
                       <span className="text-[10px] bg-[#ffd600]/10 text-[#ffd600] border border-[#ffd600]/20 rounded-full px-2 py-0.5 font-bold">PENDING</span>

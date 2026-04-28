@@ -1,6 +1,6 @@
-import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getDatabase } from "firebase/database";
+import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
+import { getAuth, Auth } from "firebase/auth";
+import { getDatabase, Database } from "firebase/database";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -12,9 +12,22 @@ const firebaseConfig = {
   databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
 };
 
-// Singleton — prevents re-initialization on hot reload
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+/**
+ * SSR-safe Firebase initialization.
+ * Firebase client SDK requires browser APIs, so we guard against
+ * server-side execution during `next build` / SSR to prevent
+ * "auth/invalid-api-key" crashes when env vars are unavailable.
+ */
+function getFirebaseApp(): FirebaseApp | null {
+  if (typeof window === "undefined") return null;
+  if (!firebaseConfig.apiKey) return null;
+  return getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+}
 
-export const auth = getAuth(app);
-export const rtdb = getDatabase(app);
+const app = getFirebaseApp();
+
+// Export lazy-safe instances — consumers must null-check in SSR contexts,
+// but all current usage is behind "use client" + useEffect so this is safe.
+export const auth: Auth = app ? getAuth(app) : (null as unknown as Auth);
+export const rtdb: Database = app ? getDatabase(app) : (null as unknown as Database);
 export default app;
