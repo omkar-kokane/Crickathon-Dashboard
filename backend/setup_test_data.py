@@ -1,5 +1,6 @@
 """
-Quick setup script: Creates an org, an event, two teams, and assigns the umpire.
+Quick setup script: Creates an org, an event, two teams, assigns the umpire,
+and seeds default ActionConfig entries for all 4 action types.
 Run this after seed_users.py to have a full testable environment.
 """
 import sys, os
@@ -12,6 +13,8 @@ from app.models.event import Event
 from app.models.team import Team
 from app.models.team_member import TeamMember
 from app.models.organization import Organization
+from app.models.action_config import ActionConfig
+from app.models.action_request import ActionType
 import uuid
 
 def setup():
@@ -70,6 +73,28 @@ def setup():
             session.commit()
             session.refresh(event)
             print(f"[Event] Created: {event.name} (ID: {event.event_id})")
+
+        # --- Seed ActionConfig defaults (same as events.py create_event) ---
+        action_defaults = {
+            ActionType.DRS: {"duration_minutes": 10, "point_cost": 10, "reward_runs": 10, "penalty_runs": -5, "first_use_free": False, "max_uses_per_team": 2},
+            ActionType.STRATEGIC_TIMEOUT: {"duration_minutes": 5, "point_cost": 10, "reward_runs": 0, "penalty_runs": 0, "first_use_free": True},
+            ActionType.RETENTION: {"duration_minutes": 10, "point_cost": 10, "reward_runs": 0, "penalty_runs": 0, "first_use_free": False, "max_uses_per_team": 2},
+            ActionType.QUICK_SINGLE: {"duration_minutes": 10, "point_cost": 0, "reward_runs": 10, "penalty_runs": -10, "first_use_free": False},
+        }
+        for action_type, cfg in action_defaults.items():
+            existing_cfg = session.exec(
+                select(ActionConfig).where(
+                    ActionConfig.event_id == event.event_id,
+                    ActionConfig.action_type == action_type,
+                )
+            ).first()
+            if existing_cfg:
+                print(f"[ActionConfig] {action_type.value} already exists for event")
+            else:
+                config = ActionConfig(event_id=event.event_id, action_type=action_type, **cfg)
+                session.add(config)
+                print(f"[ActionConfig] Created {action_type.value} config")
+        session.commit()
 
         # --- Create Team Alpha ---
         existing_team1 = session.exec(select(Team).where(Team.name == "Team Alpha")).first()

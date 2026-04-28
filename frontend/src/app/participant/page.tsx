@@ -45,6 +45,7 @@ export default function ParticipantDashboard() {
   const [eventId, setEventId] = useState<string>("");
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
+  const [actionMessage, setActionMessage] = useState("");  // message participant wants to send to umpire
   const [toasts, setToasts] = useState<ScoreToast[]>([]);
   const toastIdRef = useRef(0);
 
@@ -102,9 +103,11 @@ export default function ParticipantDashboard() {
     if (prevRunsRef.current !== null && currentRuns !== prevRunsRef.current) {
       const delta = currentRuns - prevRunsRef.current;
       const sign = delta >= 0 ? "+" : "";
-      const text = `${sign}${delta} runs  →  Total: ${currentRuns}`;
+      const reason = (currentTeam as Record<string, unknown>)?.last_reason;
+      const reasonSuffix = reason ? ` (${reason})` : "";
+      const text = `${sign}${delta} runs${reasonSuffix}  →  Total: ${currentRuns}`;
       addToast(text, "runs", delta);
-      console.log(`[Participant] 🏏 Score updated: ${sign}${delta} runs | New total: ${currentRuns}`);
+      console.log(`[Participant] 🏏 Score updated: ${sign}${delta} runs${reasonSuffix} | New total: ${currentRuns}`);
     }
 
     if (prevWalletRef.current !== null && currentWallet !== prevWalletRef.current) {
@@ -157,8 +160,10 @@ export default function ParticipantDashboard() {
         team_id: team.team_id,
         event_id: team.event_id,
         type,
+        message: actionMessage.trim() || null,
       });
       setActionMsg({ text: `${type.replaceAll("_", " ")} request sent! Waiting for Umpire...`, type: "success" });
+      setActionMessage("");
       console.log(`[Participant] Sent ${type} request for team ${team.name}`);
       // Refresh team data so wallet/runs update immediately
       await refreshTeam();
@@ -291,6 +296,22 @@ export default function ParticipantDashboard() {
               <button onClick={() => setActionMsg(null)} className="ml-3 opacity-60 hover:opacity-100 font-bold">&times;</button>
             </div>
           )}
+
+          {/* Message to Umpire */}
+          <div className="mb-4">
+            <textarea
+              id="action-message-input"
+              value={actionMessage}
+              onChange={(e) => setActionMessage(e.target.value)}
+              placeholder="Add a message for the umpire (optional)..."
+              maxLength={500}
+              rows={2}
+              className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-[#2979ff]/50 transition-all resize-none"
+            />
+            {actionMessage.length > 0 && (
+              <div className="text-right text-[10px] text-slate-500 mt-1">{actionMessage.length}/500</div>
+            )}
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             {ACTION_TYPES.map((action) => {

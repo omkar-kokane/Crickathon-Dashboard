@@ -62,6 +62,7 @@ export interface ActionRequestUpdate {
   status: ActionRequestStatus;
   created_at: string;
   resolved_at: string | null;
+  message?: string | null;
 }
 
 // ── Umpire ───────────────────────────────────────────────────────────────────

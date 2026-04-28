@@ -49,9 +49,10 @@ def seed_test_users():
             print("  [Firebase] Role claim set.")
 
             # 3. PostgreSQL Database Registration
-            existing_db = session.exec(select(User).where(User.firebase_uid == fb_uid)).first()
+            existing_db = session.exec(select(User).where(User.email == email)).first()
             if existing_db:
-                print("  [PostgreSQL] User already in database. Updating role if needed...")
+                print("  [PostgreSQL] User already in database. Updating firebase_uid and role...")
+                existing_db.firebase_uid = fb_uid
                 existing_db.role = role
                 session.add(existing_db)
             else:
