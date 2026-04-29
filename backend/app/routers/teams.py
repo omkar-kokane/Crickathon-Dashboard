@@ -276,7 +276,7 @@ def adjust_wallet(
         type=tx_type,
         amount=payload.amount,
         reason=payload.reason,
-        processed_by_umpire_id=user.user_id,
+        processed_by_user_id=user.user_id,
     )
     session.add(team)
     session.add(ledger_entry)

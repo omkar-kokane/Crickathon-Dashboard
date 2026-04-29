@@ -7,6 +7,10 @@ import { useLiveEvents } from "@/hooks/useLiveEvents";
 import api from "@/lib/api";
 import { useRouter } from "next/navigation";
 import type { CrickathonEvent, Team, UmpireUser } from "@/types";
+import { IncomingRequests } from "@/components/admin/IncomingRequests";
+import { TeamTimersSection } from "@/components/admin/TeamTimers";
+import { TeamHistorySection } from "@/components/admin/TeamHistory";
+import { RequestHistorySection } from "@/components/admin/RequestHistory";
 
 const PHASES = ["PRE_MATCH", "POWERPLAY_1", "POWERPLAY_2", "POWERPLAY_3", "POWERPLAY_4", "SUPER_OVER", "ENDED"];
 
@@ -32,54 +36,45 @@ export default function AdminDashboard() {
   
   // Provisioning State
   const [provEmail, setProvEmail] = useState("");
-  const [provRole, setProvRole] = useState("ADMIN");
+  const [provRole, setProvRole] = useState("UMPIRE");
   
-  const [msg, setMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
+  const [msg, setMsg] = useState<{ text: string; type: "success" | "error"; copyText?: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  const { eventState, secondsLeft, isActive, isTimeout } = useEventTimer(selectedEvent?.event_id || "");
+  const liveEvents = useLiveEvents(events);
+  const eventTeams = useLiveTeams(selectedEvent?.event_id?.toLowerCase() || "", teams.filter(t => t.event_id === selectedEvent?.event_id));
+
+  // Timer hook strictly for the chosen event
+  const { eventState, secondsLeft, isActive, isTimeout } = useEventTimer(selectedEvent?.event_id?.toLowerCase() || "");
 
   useEffect(() => {
+    setMounted(true);
     if (userProfile && !["ADMIN", "SUPER_ADMIN"].includes(userProfile.role)) {
       router.replace("/");
     }
-    setMounted(true);
   }, [userProfile, router]);
 
-  const loadData = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     if (!userProfile) return;
-    try {
-      const [evRes, tmRes, usRes] = await Promise.all([
-        api.get("/api/events/"),
-        api.get("/api/teams/"),
-        api.get("/api/users/")
-      ]);
-      setEvents(evRes.data);
-      setTeams(tmRes.data);
-      setUmpires(usRes.data.filter((u: UmpireUser) => u.role === "UMPIRE"));
-      if (evRes.data.length > 0) {
-        setSelectedEvent((prev) => prev ?? evRes.data[0]);
+    const [eventsRes, teamsRes, umpiresRes] = await Promise.allSettled([
+      api.get("/api/events/"),
+      api.get("/api/teams/"),
+      api.get("/api/users/umpires")
+    ]);
+    if (eventsRes.status === "fulfilled") {
+      setEvents(eventsRes.value.data);
+      if (eventsRes.value.data.length > 0 && !selectedEvent) {
+        setSelectedEvent(eventsRes.value.data[0]);
       }
-    } catch { /* handled by auth interceptor */ }
-  }, [userProfile]);
+    }
+    if (teamsRes.status === "fulfilled") setTeams(teamsRes.value.data);
+    if (umpiresRes.status === "fulfilled") setUmpires(umpiresRes.value.data);
+  }, [userProfile, selectedEvent]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const liveEvents = useLiveEvents(events);
-  const liveTeams = useLiveTeams(selectedEvent?.event_id?.toLowerCase() || "", teams);
-  const eventTeams = liveTeams.filter((t) => 
-    t.event_id?.toLowerCase() === selectedEvent?.event_id?.toLowerCase()
-  );
-
-  const showMsg = (text: string, type: "success" | "error", durationMs = 4000) => {
-    setMsg({ text, type });
-    if (durationMs > 0) {
-      setTimeout(() => setMsg(null), durationMs);
-    }
-  };
+    fetchData();
+  }, [fetchData]);
 
   const getErrorText = (err: Record<string, unknown>, fallback: string) => {
     const resp = err?.response as Record<string, unknown> | undefined;
@@ -89,21 +84,10 @@ export default function AdminDashboard() {
     return fallback;
   };
 
-  const handlePhaseChange = async () => {
-    if (!selectedEvent) return;
-    setLoading(true);
-    try {
-      const res = await api.patch(`/api/events/${selectedEvent.event_id}/phase`, {
-        phase: newPhase,
-        phase_name: newPhaseName || null,
-        duration_minutes: parseInt(duration) || null,
-      });
-      setSelectedEvent(res.data);
-      showMsg(`Phase updated to ${newPhaseName || newPhase}`, "success");
-    } catch (err: unknown) {
-      showMsg(getErrorText(err as Record<string, unknown>, "Phase update failed."), "error");
-    } finally {
-      setLoading(false);
+  const showMsg = (text: string, type: "success" | "error", timeout = 5000, copyText?: string) => {
+    setMsg({ text, type, copyText });
+    if (timeout > 0) {
+      setTimeout(() => setMsg(null), timeout);
     }
   };
 
@@ -111,16 +95,31 @@ export default function AdminDashboard() {
     if (!newEventName) return;
     setLoading(true);
     try {
-      const res = await api.post("/api/events/", {
-        name: newEventName,
-        org_id: userProfile?.org_id,
-      });
+      const res = await api.post("/api/events/", { name: newEventName });
       setEvents((prev) => [...prev, res.data]);
       setSelectedEvent(res.data);
       setNewEventName("");
-      showMsg("Event created!", "success");
+      showMsg("Event created successfully!", "success");
     } catch (err: unknown) {
       showMsg(getErrorText(err as Record<string, unknown>, "Failed to create event."), "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePhaseChange = async () => {
+    if (!selectedEvent) return;
+    setLoading(true);
+    try {
+      await api.patch(`/api/events/${selectedEvent.event_id}/phase`, {
+        phase: newPhase,
+        phase_name: newPhaseName || null,
+        duration_minutes: parseInt(duration),
+      });
+      showMsg(`Phase changed to ${newPhase}`, "success");
+      setNewPhaseName("");
+    } catch (err: unknown) {
+      showMsg(getErrorText(err as Record<string, unknown>, "Failed to update phase."), "error");
     } finally {
       setLoading(false);
     }
@@ -137,7 +136,7 @@ export default function AdminDashboard() {
       });
       setTeams((prev) => [...prev, res.data]);
       setNewTeamName("");
-      showMsg(`Team created! Invite Code: ${res.data.invite_code}`, "success");
+      showMsg(`Team created! Invite Code: ${res.data.invite_code}`, "success", 5000, res.data.invite_code);
     } catch (err: unknown) {
       showMsg(getErrorText(err as Record<string, unknown>, "Failed to create team."), "error");
     } finally {
@@ -155,15 +154,15 @@ export default function AdminDashboard() {
       });
       const tempPw = res.data?.temporary_password;
       
-      // Instantly update the umpire dropdown if an umpire was created
-      if (provRole === "UMPIRE") {
-        setUmpires(prev => [...prev, res.data]);
-      }
+      // Refresh umpire list from API to get properly filtered data
+      try {
+        const umpireRes = await api.get("/api/users/umpires");
+        setUmpires(umpireRes.data);
+      } catch { /* ignore */ }
       
       setProvEmail("");
       if (tempPw) {
-        // Keep credential banner visible for 2 minutes so user can copy
-        showMsg(`Granted ${provRole} to ${provEmail}!  |  Email: ${res.data.email}  |  Password: ${tempPw}`, "success", 0);
+        showMsg(`Granted ${provRole} to ${provEmail}!  |  Email: ${res.data.email}  |  Password: ${tempPw}`, "success", 0, `Email: ${res.data.email} | Password: ${tempPw}`);
       } else {
         showMsg(`Successfully granted ${provRole} to ${provEmail}!`, "success");
       }
@@ -192,14 +191,12 @@ export default function AdminDashboard() {
 
   const urgencyColor = secondsLeft < 300 ? "text-[#ff1744]" : secondsLeft < 600 ? "text-[#ffd600]" : "text-[#00e676]";
 
-  // Derive the display name for the current phase
   const currentPhaseName = eventState?.phase_name || eventState?.current_phase || selectedEvent?.current_phase;
 
   if (!mounted) return null;
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] pb-10">
-      {/* Header */}
       <header className="glass border-b border-[#2a2a3a] px-6 py-4 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <span className="text-2xl">🏟</span>
@@ -225,7 +222,7 @@ export default function AdminDashboard() {
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         {msg && (
           <div className={`rounded-xl px-4 py-3 text-sm font-medium flex items-center justify-between gap-3 ${
             msg.type === "success" ? "bg-[#00e676]/10 border border-[#00e676]/20 text-[#00e676]" : "bg-[#ff1744]/10 border border-[#ff1744]/20 text-[#ff1744]"
@@ -233,16 +230,15 @@ export default function AdminDashboard() {
             <span className="flex-1 select-all">{msg.text}</span>
             <div className="flex items-center gap-2 shrink-0">
               <button
-                onClick={() => { navigator.clipboard.writeText(msg.text); }}
+                onClick={() => { navigator.clipboard.writeText(msg.copyText || msg.text); }}
                 className="text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded-lg transition-all"
-                title="Copy to clipboard"
+                title={msg.copyText ? `Copy: ${msg.copyText}` : "Copy message"}
               >
                 Copy
               </button>
               <button
                 onClick={() => setMsg(null)}
                 className="text-xs hover:opacity-70 transition-all font-bold text-lg leading-none"
-                title="Dismiss"
               >
                 &times;
               </button>
@@ -250,9 +246,10 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
           {/* Left Column — Master Control */}
-          <div className="lg:col-span-1 space-y-4">
+          <div className="lg:col-span-4 space-y-4">
             {/* Event Selector / Creator */}
             <div className="glass rounded-2xl p-5">
               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Events</h2>
@@ -287,7 +284,6 @@ export default function AdminDashboard() {
                 </div>
               )}
 
-              {/* Timeout Banner inside Match Engine */}
               {isTimeout && (
                 <div className="mb-3 rounded-xl px-4 py-3 bg-[#ff1744]/10 border border-[#ff1744]/30 text-center animate-pulse">
                   <div className="text-lg font-black text-[#ff1744]">🚨 TIMEOUT</div>
@@ -359,7 +355,7 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Super Admin Panel */}
+            {/* Super Admin Only: Provision Users */}
             {userProfile?.role === "SUPER_ADMIN" && (
               <div className="glass rounded-2xl p-5 border border-[#d500f9]/30">
                 <h2 className="text-xs font-bold text-[#d500f9] uppercase tracking-widest mb-3 flex items-center gap-2">
@@ -369,7 +365,7 @@ export default function AdminDashboard() {
                 <div className="space-y-3">
                   <input
                     type="email"
-                    placeholder="User's Firebase Email"
+                    placeholder="User's Email Address"
                     value={provEmail}
                     onChange={(e) => setProvEmail(e.target.value)}
                     className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[#d500f9]/50"
@@ -380,8 +376,8 @@ export default function AdminDashboard() {
                       onChange={(e) => setProvRole(e.target.value)}
                       className="flex-1 bg-[#0a0a0f] border border-[#2a2a3a] rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[#d500f9]/50 cursor-pointer"
                     >
-                      <option value="ADMIN">Admin</option>
                       <option value="UMPIRE">Umpire</option>
+                      <option value="ADMIN">Admin</option>
                     </select>
                     <button 
                       onClick={handleProvisionUser} 
@@ -391,67 +387,87 @@ export default function AdminDashboard() {
                       Grant
                     </button>
                   </div>
-                  <p className="text-[10px] text-slate-500 leading-tight">
-                    *If the user doesn&apos;t have an account yet, one will be created automatically with a temporary password.
-                  </p>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Right Column — Global Leaderboard + Wallet Management */}
-          <div className="lg:col-span-2 space-y-4">
-            {/* Live Leaderboard */}
-            <div className="glass rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-bold text-white">🏆 Live Leaderboard</h2>
-                <span className="text-xs text-slate-500">{selectedEvent?.name}</span>
-              </div>
-              <div className="space-y-2">
-                {[...eventTeams]
-                  .sort((a, b) => b.total_runs - a.total_runs)
-                  .map((team, idx) => (
-                    <div key={team.team_id} className="flex items-center gap-4 bg-[#0a0a0f] rounded-xl p-3 border border-[#2a2a3a]">
-                      <div className={`text-lg font-black w-8 text-center ${idx === 0 ? "text-[#ffd600]" : idx === 1 ? "text-slate-300" : idx === 2 ? "text-orange-400" : "text-slate-600"}`}>
-                        {idx + 1}
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-bold text-white text-sm">{team.name}</div>
-                        <div className="text-xs text-slate-500">Code: <span className="font-mono text-[#00e676]">{team.invite_code}</span></div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-xs text-slate-400">Runs</div>
-                        <div className="text-xl font-black text-[#00e676]">{team.total_runs}</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-xs text-slate-400">Wallet</div>
-                        <div className="text-xl font-black text-[#ffd600]">{team.wallet_balance}</div>
-                      </div>
+          {/* Right Column — Requests, Leaderboard, History */}
+          <div className="lg:col-span-8 space-y-6">
+            
+            {/* Incoming Requests Feed */}
+            {selectedEvent && (
+              <IncomingRequests 
+                eventId={selectedEvent.event_id} 
+                teams={eventTeams} 
+                showMsg={showMsg} 
+              />
+            )}
 
-                      {/* Wallet Quick Adjust */}
-                      <div className="flex gap-1 items-center">
-                        <input
-                          type="number"
-                          placeholder="±pts"
-                          value={walletAdjust[team.team_id] || ""}
-                          onChange={(e) => setWalletAdjust((prev) => ({ ...prev, [team.team_id]: e.target.value }))}
-                          className="w-16 bg-[#111118] border border-[#2a2a3a] rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-[#ffd600]/50"
-                        />
-                        <button
-                          onClick={() => handleWalletSet(team.team_id, walletAdjust[team.team_id])}
-                          disabled={loading}
-                          className="bg-[#ffd600]/10 border border-[#ffd600]/30 text-[#ffd600] text-xs font-bold px-2 py-1 rounded-lg hover:bg-[#ffd600]/20 transition-all"
-                        >
-                          Add / Sub
-                        </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Leaderboard */}
+              <div className="glass rounded-2xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-sm font-bold text-white">🏆 Live Leaderboard</h2>
+                </div>
+                <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                  {[...eventTeams]
+                    .sort((a, b) => b.total_runs - a.total_runs)
+                    .map((team, idx) => (
+                      <div key={team.team_id} className="flex items-center gap-4 bg-[#0a0a0f] rounded-xl p-3 border border-[#2a2a3a]">
+                        <div className={`text-lg font-black w-6 text-center ${idx === 0 ? "text-[#ffd600]" : idx === 1 ? "text-slate-300" : idx === 2 ? "text-orange-400" : "text-slate-600"}`}>
+                          {idx + 1}
+                        </div>
+                        <div className="flex-1">
+                          <div className="font-bold text-white text-sm">{team.name}</div>
+                          <div className="text-xs text-slate-500">Code: <span className="font-mono text-[#00e676]">{team.invite_code}</span></div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[10px] text-slate-400">Runs</div>
+                          <div className="text-lg font-black text-[#00e676]">{team.total_runs}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[10px] text-slate-400">Wallet</div>
+                          <div className="text-lg font-black text-[#ffd600]">{team.wallet_balance}</div>
+                        </div>
+
+                        {/* Wallet Quick Adjust */}
+                        <div className="flex flex-col gap-1 items-end ml-2">
+                          <input
+                            type="number"
+                            placeholder="±pts"
+                            value={walletAdjust[team.team_id] || ""}
+                            onChange={(e) => setWalletAdjust((prev) => ({ ...prev, [team.team_id]: e.target.value }))}
+                            className="w-14 bg-[#111118] border border-[#2a2a3a] rounded py-1 px-1.5 text-xs text-center text-white outline-none focus:border-[#ffd600]/50"
+                          />
+                          <button
+                            onClick={() => handleWalletSet(team.team_id, walletAdjust[team.team_id])}
+                            disabled={loading}
+                            className="text-[10px] text-[#ffd600] hover:text-[#ffea00] transition-colors"
+                          >
+                            Update
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                {eventTeams.length === 0 && (
-                  <div className="text-center py-8 text-slate-500 text-sm">No teams yet. Create one above!</div>
-                )}
+                    ))}
+                  {eventTeams.length === 0 && (
+                    <div className="text-center py-8 text-slate-500 text-sm">No teams yet. Create one!</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                {/* Team Timers */}
+                {selectedEvent && <TeamTimersSection eventId={selectedEvent.event_id} teams={eventTeams} />}
+                
+                {/* Team Ledger History */}
+                <TeamHistorySection teams={eventTeams} />
+
+                {/* Request History */}
+                <RequestHistorySection teams={eventTeams} />
               </div>
             </div>
+
           </div>
         </div>
       </div>

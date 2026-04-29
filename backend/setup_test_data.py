@@ -107,7 +107,7 @@ def setup():
                 event_id=event.event_id,
                 name="Team Alpha",
                 invite_code="ALPHA2026",
-                wallet_balance=1000,
+                wallet_balance=100,
                 total_runs=0,
                 umpire_id=umpire.user_id,
             )
@@ -127,7 +127,7 @@ def setup():
                 event_id=event.event_id,
                 name="Team Beta",
                 invite_code="BETA2026",
-                wallet_balance=1000,
+                wallet_balance=100,
                 total_runs=0,
                 umpire_id=umpire.user_id,
             )
