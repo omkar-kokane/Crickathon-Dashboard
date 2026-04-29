@@ -2,20 +2,7 @@
 import { useEffect, useState, useRef } from "react";
 import { ref, onValue } from "firebase/database";
 import { rtdb } from "@/lib/firebase";
-
-interface EventState {
-  event_id: string;
-  current_phase: string;
-  phase_name?: string | null;
-  phase_end_time: string | null;
-}
-
-interface CountdownResult {
-  eventState: EventState | null;
-  secondsLeft: number;
-  isActive: boolean;
-  isTimeout: boolean;
-}
+import type { EventState, CountdownResult } from "@/types";
 
 /**
  * Subscribes to Firebase Realtime DB for live event phase/timer state.
@@ -30,14 +17,9 @@ export function useEventTimer(eventId: string): CountdownResult {
 
   // Subscribe to Firebase for real-time updates
   useEffect(() => {
-    if (!eventId) {
-      console.log("❌ NO EVENT ID"); //-------
-      return;
-    }
+    if (!eventId || !rtdb) return;
+
     const pathId = eventId.toLowerCase();
-
-    console.log("🔥 LISTENING TO:", pathId); // ------------------
-
     const eventRef = ref(rtdb, `/events/${pathId}`);
     const unsubscribe = onValue(eventRef, (snapshot) => {
       const data = snapshot.val();

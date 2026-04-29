@@ -26,6 +26,7 @@ class ActionRequestCreate(BaseModel):
     team_id: uuid.UUID
     event_id: uuid.UUID
     type: ActionType
+    message: Optional[str] = None  # Optional note from participant to umpire
 
 
 class ResolvePayload(BaseModel):
@@ -47,6 +48,7 @@ class ActionRequestRead(BaseModel):
     reward_runs: Optional[int]
     penalty_runs: Optional[int]
     notes: Optional[str]
+    message: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -123,6 +125,7 @@ def create_action_request(
         team_id=payload.team_id,
         event_id=payload.event_id,
         type=payload.type,
+        message=payload.message,
         duration_minutes=config.duration_minutes,
         point_cost=point_cost,
         reward_runs=config.reward_runs,

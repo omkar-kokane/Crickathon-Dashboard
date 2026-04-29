@@ -81,7 +81,7 @@ def add_run_entry(
     session.refresh(entry)
 
     from app.services.firebase_sync import push_team_update
-    push_team_update(team)
+    push_team_update(team, last_reason=payload.reason, last_amount=payload.amount)
 
     return entry
 

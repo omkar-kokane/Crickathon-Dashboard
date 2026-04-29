@@ -44,7 +44,7 @@ def verify_firebase_token(id_token: str) -> dict:
     try:
         # clock_skew_seconds tolerates small clock differences between
         # the local machine and Google's servers (common on Windows).
-        decoded = auth.verify_id_token(id_token, check_revoked=False, clock_skew_seconds=10)
+        decoded = auth.verify_id_token(id_token, check_revoked=False, clock_skew_seconds=60)
         return decoded
     except Exception as e:
         logger.error(f"[Firebase] Token verification failed: {type(e).__name__}: {e}")

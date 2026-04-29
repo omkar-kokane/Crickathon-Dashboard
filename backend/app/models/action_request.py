@@ -34,6 +34,9 @@ class ActionRequest(SQLModel, table=True):
     resolved_by_umpire_id: Optional[uuid.UUID] = Field(default=None, foreign_key="users.user_id")
     notes: Optional[str] = Field(default=None)
 
+    # Optional message from participant to umpire
+    message: Optional[str] = Field(default=None, max_length=500)
+
     # Snapshot of config values at time of request (pulled from ActionConfig)
     duration_minutes: Optional[int] = Field(default=None)
     point_cost: Optional[int] = Field(default=None)
