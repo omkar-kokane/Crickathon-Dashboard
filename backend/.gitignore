@@ -13,3 +13,12 @@ service_account_key.json
 dist/
 build/
 *.egg-info/
+
+# Dev/Admin utility scripts (sensitive — never commit)
+seed_users.py
+setup_test_data.py
+reset_full_database.py
+reset_complete.py
+reset_drs_actions.py
+skip_timer.py
+test_cors.py
