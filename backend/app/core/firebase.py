@@ -26,13 +26,30 @@ def get_firebase_app():
     # Option 1: JSON string from environment variable (for cloud deployments like Render)
     sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
     if sa_json:
+        # Strip surrounding quotes if the user accidentally pasted them
+        if sa_json.startswith('"') and sa_json.endswith('"'):
+            sa_json = sa_json[1:-1]
+        elif sa_json.startswith("'") and sa_json.endswith("'"):
+            sa_json = sa_json[1:-1]
+            
         try:
             sa_dict = json.loads(sa_json)
+        except json.JSONDecodeError:
+            try:
+                # If the string contains literal \n and \", decode them first
+                import codecs
+                unescaped = codecs.decode(sa_json, 'unicode_escape')
+                sa_dict = json.loads(unescaped)
+            except Exception as e:
+                logger.error(f"[Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON: {e}")
+                raise
+                
+        try:
             cred = credentials.Certificate(sa_dict)
             logger.info("[Firebase] Initializing with service account from env var")
             return firebase_admin.initialize_app(cred, options)
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.error(f"[Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON: {e}")
+        except ValueError as e:
+            logger.error(f"[Firebase] Init failed: {e}")
             raise
 
     # Option 2: File path (for local development)
