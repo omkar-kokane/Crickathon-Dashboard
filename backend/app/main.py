@@ -6,10 +6,19 @@ from app.core.config import settings
 from app.routers import organizations, users, events, teams, ledger, action_requests
 from app.db.base import create_db_and_tables
 
+# Configure logging so errors are visible in Render logs
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logging.info("Initializing database schema...")
-    create_db_and_tables()
+    try:
+        logger.info("Initializing database schema...")
+        create_db_and_tables()
+        logger.info("Database schema ready.")
+    except Exception as e:
+        logger.error(f"STARTUP FAILED: {e}")
+        raise
     yield
 
 app = FastAPI(
