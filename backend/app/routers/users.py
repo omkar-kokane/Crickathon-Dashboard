@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 from pydantic import BaseModel, EmailStr
 
 from app.db.base import get_session
-from app.core.auth import get_current_user, is_super_admin, get_user_org_id
+from app.core.auth import get_current_user, is_super_admin, get_user_org_id, require_role
 from app.core.firebase import set_user_role_claim
 from app.models.user import User, UserRole
 from app.models.organization import Organization
@@ -108,10 +108,12 @@ def get_me(current_user: dict = Depends(get_current_user), session: Session = De
 def assign_role(
     payload: AssignRolePayload,
     session: Session = Depends(get_session),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
 ):
     """
     Admin/Super Admin: assign a role to a user.
+    Admins can only create UMPIRE users (within their org).
+    Super Admins can create ADMIN and UMPIRE users.
     If the user doesn't have a Firebase account yet, one is created automatically
     with a temporary password that is returned in the response.
     """
@@ -119,8 +121,18 @@ def assign_role(
     import secrets
     import string
 
-    if payload.role == UserRole.SUPER_ADMIN and current_user.get("role") != UserRole.SUPER_ADMIN.value:
-        raise HTTPException(status_code=403, detail="Only a Super Admin can assign the Super Admin role.")
+    caller_role = current_user.get("role")
+
+    if payload.role == UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Super Admin role cannot be assigned via this endpoint.")
+
+    # Admins can only create UMPIRE users
+    if caller_role == UserRole.ADMIN.value and payload.role not in (UserRole.UMPIRE,):
+        raise HTTPException(status_code=403, detail="Admins can only provision Umpire accounts.")
+
+    # Auto-assign org_id from the calling admin if not specified
+    if not payload.org_id and current_user.get("org_id"):
+        payload.org_id = uuid.UUID(current_user["org_id"])
 
     temp_password = None
 
@@ -148,7 +160,30 @@ def assign_role(
 
     existing = session.exec(select(User).where(User.firebase_uid == target_uid)).first()
     if existing:
-        raise HTTPException(status_code=400, detail="User already provisioned with a role.")
+        # Update existing user's role and org instead of rejecting
+        existing.role = payload.role
+        existing.email = payload.email
+        if payload.display_name:
+            existing.display_name = payload.display_name
+        if payload.org_id:
+            existing.org_id = payload.org_id
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        set_user_role_claim(target_uid, payload.role.value)
+
+        from app.services.firebase_sync import push_user_update
+        push_user_update(existing)
+
+        return AssignRoleResponse(
+            user_id=existing.user_id,
+            firebase_uid=existing.firebase_uid,
+            email=existing.email,
+            display_name=existing.display_name,
+            role=existing.role,
+            org_id=existing.org_id,
+            temporary_password=temp_password,
+        )
 
     user = User(
         firebase_uid=target_uid,
@@ -175,6 +210,26 @@ def assign_role(
         org_id=user.org_id,
         temporary_password=temp_password,
     )
+
+
+@router.get("/umpires", response_model=List[UserRead])
+def list_umpires(
+    session: Session = Depends(get_session),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Returns all users with the UMPIRE role.
+    Super Admins see all umpires; scoped users see only umpires in their org.
+    Used by the admin dashboard to populate the umpire assignment dropdown.
+    """
+    query = select(User).where(User.role == UserRole.UMPIRE)
+
+    if not is_super_admin(current_user):
+        user_org_id = get_user_org_id(current_user)
+        if user_org_id:
+            query = query.where(User.org_id == user_org_id)
+
+    return session.exec(query).all()
 
 
 @router.get("/", response_model=List[UserRead])

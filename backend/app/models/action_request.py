@@ -19,6 +19,8 @@ class ActionStatus(str, Enum):
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    TIMER_EXPIRED = "TIMER_EXPIRED"          # Quick Single timer ended, awaiting umpire verdict
+    FORWARDED_TO_ADMIN = "FORWARDED_TO_ADMIN" # Umpire forwarded to admin for decision
 
 
 class ActionRequest(SQLModel, table=True):
@@ -34,11 +36,22 @@ class ActionRequest(SQLModel, table=True):
     resolved_by_umpire_id: Optional[uuid.UUID] = Field(default=None, foreign_key="users.user_id")
     notes: Optional[str] = Field(default=None)
 
-    # Optional message from participant to umpire
-    message: Optional[str] = Field(default=None, max_length=500)
+    # Compulsory message from participant (e.g. "Need help with API" or tech name for Retention)
+    message: str = Field(nullable=False, default="")
 
     # Snapshot of config values at time of request (pulled from ActionConfig)
     duration_minutes: Optional[int] = Field(default=None)
     point_cost: Optional[int] = Field(default=None)
     reward_runs: Optional[int] = Field(default=None)
     penalty_runs: Optional[int] = Field(default=None)
+
+    # Team-specific action timer (set when umpire approves)
+    action_timer_end: Optional[datetime] = Field(default=None)
+
+    # Admin forwarding (for Retention and Quick Single failures)
+    forwarded_to_admin: bool = Field(default=False)
+    umpire_deduction_amount: Optional[int] = Field(default=None)  # Retention: wallet pts umpire wants to deduct
+    admin_status: Optional[str] = Field(default=None)  # APPROVED / REJECTED
+    admin_notes: Optional[str] = Field(default=None)    # Admin's message back to participant
+    admin_resolved_at: Optional[datetime] = Field(default=None)
+    admin_resolved_by_id: Optional[uuid.UUID] = Field(default=None, foreign_key="users.user_id")

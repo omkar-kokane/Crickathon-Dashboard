@@ -46,13 +46,23 @@ export interface Team {
   wallet_balance: number;
   total_runs: number;
   umpire_id?: string | null;
+  last_reason?: string;
+  last_amount?: number;
 }
 
 // ── Action Requests ──────────────────────────────────────────────────────────
 
 export type ActionRequestType = "DRS" | "STRATEGIC_TIMEOUT" | "RETENTION" | "QUICK_SINGLE";
 
-export type ActionRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "COMPLETED" | "FAILED";
+export type ActionRequestStatus =
+  | "PENDING"
+  | "APPROVED"
+  | "REJECTED"
+  | "COMPLETED"
+  | "FAILED"
+  | "TIMER_EXPIRED"
+  | "FORWARDED_TO_ADMIN"
+  | "IN_PROGRESS";
 
 export interface ActionRequestUpdate {
   request_id: string;
@@ -63,6 +73,29 @@ export interface ActionRequestUpdate {
   created_at: string;
   resolved_at: string | null;
   message?: string | null;
+  action_timer_end?: string | null;
+  forwarded_to_admin?: boolean;
+  admin_status?: string | null;
+  admin_notes?: string | null;
+  umpire_deduction_amount?: number | null;
+  duration_minutes?: number | null;
+  point_cost?: number | null;
+}
+
+// ── Team Timers (from Firebase RTDB) ─────────────────────────────────────────
+
+export interface TeamTimerEntry {
+  action_type: string;
+  end_time: string | null;
+  label: string;
+  active: boolean;
+}
+
+export interface TeamTimers {
+  DRS?: TeamTimerEntry;
+  STRATEGIC_TIMEOUT?: TeamTimerEntry;
+  RETENTION?: TeamTimerEntry;
+  QUICK_SINGLE?: TeamTimerEntry;
 }
 
 // ── Umpire ───────────────────────────────────────────────────────────────────
@@ -72,6 +105,20 @@ export interface UmpireUser {
   email: string;
   display_name?: string;
   role: string;
+}
+
+// ── Ledger History ───────────────────────────────────────────────────────────
+
+export interface LedgerHistoryEntry {
+  transaction_id: string;
+  team_id: string;
+  type: string;
+  amount: number;
+  reason: string;
+  timestamp: string;
+  processed_by_user_id: string;
+  processed_by_email?: string;
+  request_id?: string | null;
 }
 
 // ── Timer State (from Firebase RTDB) ─────────────────────────────────────────
