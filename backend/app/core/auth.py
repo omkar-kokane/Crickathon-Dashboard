@@ -99,12 +99,16 @@ def enforce_org_on_create(current_user: dict, requested_org_id: Optional[uuid.UU
     user_org_id = get_user_org_id(current_user)
 
     if is_super_admin(current_user):
-        if not requested_org_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="org_id is required for SUPER_ADMIN operations.",
-            )
-        return requested_org_id
+        if requested_org_id:
+            return requested_org_id
+        # Auto-use Super Admin's own org if not explicitly specified
+        sa_org = get_user_org_id(current_user)
+        if sa_org:
+            return sa_org
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="org_id is required. Super Admin has no organization assigned.",
+        )
 
     if not user_org_id:
         raise HTTPException(
