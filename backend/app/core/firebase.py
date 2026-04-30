@@ -1,4 +1,5 @@
 import logging
+import json
 import firebase_admin
 from firebase_admin import credentials, auth
 from app.core.config import settings
@@ -22,17 +23,30 @@ def get_firebase_app():
     if settings.FIREBASE_DATABASE_URL:
         options["databaseURL"] = settings.FIREBASE_DATABASE_URL
 
+    # Option 1: JSON string from environment variable (for cloud deployments like Render)
+    sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+    if sa_json:
+        try:
+            sa_dict = json.loads(sa_json)
+            cred = credentials.Certificate(sa_dict)
+            logger.info("[Firebase] Initializing with service account from env var")
+            return firebase_admin.initialize_app(cred, options)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"[Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON: {e}")
+            raise
+
+    # Option 2: File path (for local development)
     cred_path = settings.GOOGLE_APPLICATION_CREDENTIALS
     if os.path.exists(cred_path):
         try:
             cred = credentials.Certificate(cred_path)
-            logger.info(f"[Firebase] Initializing with service account: {cred_path}")
+            logger.info(f"[Firebase] Initializing with service account file: {cred_path}")
             return firebase_admin.initialize_app(cred, options)
         except ValueError:
             return firebase_admin.get_app()
     else:
         try:
-            logger.info("[Firebase] Initializing with Application Default Credentials (Cloud Run)")
+            logger.info("[Firebase] Initializing with Application Default Credentials")
             return firebase_admin.initialize_app(options=options)
         except ValueError:
             return firebase_admin.get_app()
