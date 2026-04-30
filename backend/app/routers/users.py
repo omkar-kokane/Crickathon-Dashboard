@@ -83,10 +83,17 @@ def bootstrap_super_admin(
     if existing:
         raise HTTPException(status_code=400, detail="User already exists in the database.")
 
+    # Auto-create a default organization for the Super Admin
+    from app.models.organization import Organization
+    org = Organization(name="Crickathon")
+    session.add(org)
+    session.flush()  # get org_id before creating user
+
     user = User(
         firebase_uid=fb_uid,
         email=fb_email,
         role=UserRole.SUPER_ADMIN,
+        org_id=org.org_id,
     )
     session.add(user)
     session.commit()
