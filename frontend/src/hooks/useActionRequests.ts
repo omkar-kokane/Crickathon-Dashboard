@@ -14,6 +14,9 @@ export function useActionRequests(eventId: string): ActionRequestUpdate[] {
   useEffect(() => {
     if (!eventId || !rtdb) return;
     
+    // Clear state immediately when switching events to prevent leakage
+    setRequests([]);
+
     const pathId = eventId.toLowerCase();
     const reqRef = ref(rtdb, `/action_requests/${pathId}`);
     

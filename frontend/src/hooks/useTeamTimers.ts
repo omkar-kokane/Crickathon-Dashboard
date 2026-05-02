@@ -19,6 +19,10 @@ export function useTeamTimers(eventId: string, teamId: string) {
   useEffect(() => {
     if (!eventId || !teamId || !rtdb) return;
 
+    // Clear state immediately when switching contexts to prevent leakage
+    setTimers({});
+    setCountdowns({});
+
     const pathEid = eventId.toLowerCase();
     const pathTid = teamId.toLowerCase();
     const timerRef = ref(rtdb, `/team_timers/${pathEid}/${pathTid}`);
