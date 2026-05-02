@@ -14,6 +14,9 @@ export function useLiveTeams(eventId: string, initialTeams: Team[] = []) {
     const pathId = eventId.toLowerCase();
     const teamsRef = ref(rtdb, `/teams/${pathId}`);
 
+    // Clear state immediately when switching events to prevent leakage
+    setFirebaseData({});
+
     const unsubscribe = onValue(teamsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
@@ -23,6 +26,9 @@ export function useLiveTeams(eventId: string, initialTeams: Team[] = []) {
           normalized[key.toLowerCase()] = val as Team;
         });
         setFirebaseData(normalized);
+      } else {
+        // If event has no teams in Firebase, ensure state is empty
+        setFirebaseData({});
       }
     });
 
