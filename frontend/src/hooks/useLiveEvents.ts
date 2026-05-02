@@ -19,6 +19,8 @@ export function useLiveEvents(initialEvents: CrickathonEvent[] = []) {
           normalized[key.toLowerCase()] = val as CrickathonEvent;
         });
         setFirebaseData(normalized);
+      } else {
+        setFirebaseData({});
       }
     });
 
